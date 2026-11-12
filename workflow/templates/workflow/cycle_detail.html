@@ -108,71 +108,89 @@
         {% if cycle.direction %}<p class="note note-plain"><strong>Your direction:</strong> {{ cycle.direction }}</p>{% endif %}
       {% endif %}
 
-      {% if findings %}
-        <div class="evidence">
-          <h3>What the research found</h3>
-          <ul class="findings">
-            {% for f in findings %}
-              <li class="finding {% if not f.verified %}is-dropped{% endif %}">
-                <div class="finding-head">
-                  <p class="timeframe timeframe-{{ f.timeframe }}">{% if f.timeframe == "recurring" %}Recurs in past seasons{% elif f.timeframe == "both" %}Recurs and rising now{% else %}Current trend{% endif %}{% if f.seasons_observed %}<span class="meta"> {{ f.seasons_observed }}</span>{% endif %}</p>
-                  <h4>{{ f.theme }}</h4>
-                  {% if f.verified %}
-                    <a class="source" href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title|default:"Source" }}{% if f.source_date %}, {{ f.source_date }}{% endif %}</a>
-                  {% else %}
-                    <span class="stamp stamp-rejected">Left out: source not confirmed</span>
-                  {% endif %}
-                </div>
-                <p>{{ f.what_people_want }}</p>
-                <p class="meta">{{ f.evidence }}</p>
-              </li>
-            {% endfor %}
-          </ul>
-          <p class="meta">Each source link was returned by the search itself. A finding whose link could not be confirmed is shown but kept out of the brief.</p>
-        </div>
-      {% endif %}
-
-      {% if signals %}
-        <div class="evidence">
-          <h3>What your audience said</h3>
-          <div class="tally">
-            <button type="button" class="tally-cell is-active" data-filter="all"><strong>{{ signals|length }}</strong> signals</button>
-            <button type="button" class="tally-cell tally-purchase" data-filter="purchase"><strong>{{ intent_counts.purchase }}</strong> asked to buy</button>
-            <button type="button" class="tally-cell" data-filter="interest"><strong>{{ intent_counts.interest }}</strong> showed interest</button>
-            <button type="button" class="tally-cell" data-filter="trend"><strong>{{ intent_counts.trend }}</strong> external trend</button>
-          </div>
-          {% if product_counts %}
-            <p class="meta">Most mentioned: {% for name, count in product_counts %}{{ name }} ({{ count }}){% if not forloop.last %}, {% endif %}{% endfor %}</p>
-          {% endif %}
-          <details class="fold">
-            <summary>Extracted signals</summary>
-            <div class="table-wrap">
-              <table class="signals" id="signals-table">
-                <thead><tr><th>Intent</th><th>Product</th><th>Technique</th><th>Quote</th><th>Source</th></tr></thead>
-                <tbody>
-                  {% for s in signals %}
-                    <tr data-intent="{{ s.intent }}">
-                      <td><span class="intent intent-{{ s.intent }}">{{ s.intent|label }}</span></td>
-                      <td>{{ s.product_type|default:"Not stated" }}</td>
-                      <td>{{ s.technique|default:"Not stated" }}</td>
-                      <td class="quote">{% if s.quote %}"{{ s.quote }}"{% endif %}</td>
-                      <td>{{ s.source|label }}</td>
-                    </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        </div>
-      {% endif %}
-
       {% if brief %}
         <article class="brief">
           <header class="brief-head">
-            <h3>Research brief</h3>
+            <div>
+              <h3>Research brief</h3>
+              {% if bv %}<p class="meta">{{ bv.season }}</p>{% endif %}
+            </div>
             <p class="stamp stamp-{{ brief.status }}">{{ brief.get_status_display }}{% if brief.decided_at %}, {{ brief.decided_at|date:"j M Y" }}{% endif %}</p>
           </header>
-          <div class="brief-text">{{ brief.text|linebreaks }}</div>
+
+          {% if bv %}
+            <p class="brief-summary">{{ bv.summary }}</p>
+
+            <h4 class="brief-label">Demand themes, strongest first</h4>
+            <ol class="themes">
+              {% for t in bv.themes %}
+                <li class="theme strength-{{ t.strength }}">
+                  <div class="theme-rating">
+                    <span class="stitches meter" role="img" aria-label="Evidence: {{ t.strength }}">
+                      {% for i in "123" %}<span class="stitch {% if forloop.counter <= t.level %}on{% endif %}"></span>{% endfor %}
+                    </span>
+                    <span class="theme-strength">{{ t.strength_label }}</span>
+                  </div>
+                  <div class="theme-body">
+                    <h5>{{ t.name }}</h5>
+                    <p>{{ t.what_people_want }}</p>
+                    <p class="meta">{{ t.strength_reason }}</p>
+                    <p class="theme-tags">
+                      {% if t.timeframe_label %}<span class="chip chip-time-{{ t.timeframe }}">{{ t.timeframe_label }}</span>{% endif %}
+                      {% for b in t.basis_labels %}<span class="chip">{{ b }}</span>{% endfor %}
+                      {% if t.audience_signals %}<span class="chip">{{ t.audience_signals }}</span>{% endif %}
+                    </p>
+                    {% if t.sources %}
+                      <p class="theme-sources">Sources: {% for s in t.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.title }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                    {% endif %}
+                  </div>
+                </li>
+              {% endfor %}
+            </ol>
+
+            <h4 class="brief-label">Season view</h4>
+            <div class="season-view">
+              <section class="season-col season-returns">
+                <h5>Returns every year</h5>
+                {% if bv.season_view.returns_every_year %}<ul>{% for item in bv.season_view.returns_every_year %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}
+              </section>
+              <section class="season-col season-new">
+                <h5>New this year</h5>
+                {% if bv.season_view.new_this_year %}<ul>{% for item in bv.season_view.new_this_year %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}
+              </section>
+              <section class="season-col season-fading">
+                <h5>Fading, avoid</h5>
+                {% if bv.season_view.fading %}<ul>{% for item in bv.season_view.fading %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}
+              </section>
+            </div>
+
+            <div class="brief-pair">
+              <section>
+                <h4 class="brief-label">Your direction</h4>
+                <p><span class="verdict verdict-{{ bv.direction.verdict }}">{{ bv.direction.label }}</span></p>
+                {% if bv.direction.explanation %}<p>{{ bv.direction.explanation }}</p>{% endif %}
+              </section>
+              <section>
+                <h4 class="brief-label">Earlier price tests</h4>
+                <p>{{ bv.past_tests }}</p>
+              </section>
+            </div>
+
+            {% if bv.gaps %}
+              <h4 class="brief-label">What is still unknown</h4>
+              <ul class="plain-list">{% for gap in bv.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>
+            {% endif %}
+
+            {% if bv.conflicts %}
+              <div class="issues issues-blocking">
+                <h4>Conflicts with the brand brief</h4>
+                <ul>{% for conflict in bv.conflicts %}<li>{{ conflict }}</li>{% endfor %}</ul>
+              </div>
+            {% endif %}
+          {% else %}
+            <div class="brief-text">{{ brief.text|linebreaks }}</div>
+          {% endif %}
+
           {% if brief.founder_notes %}
             <p class="note"><strong>Your notes:</strong> {{ brief.founder_notes }}</p>
           {% endif %}
@@ -191,6 +209,75 @@
             </div>
           </form>
         {% endif %}
+      {% endif %}
+
+      {% if finding_groups or dropped_findings %}
+        <details class="fold fold-evidence" {% if not brief %}open{% endif %}>
+          <summary>Sources behind the brief <span class="chips">{% for group in finding_groups %}<span class="chip">{{ group.label }} {{ group.items|length }}</span>{% endfor %}{% if dropped_findings %}<span class="chip">Left out {{ dropped_findings|length }}</span>{% endif %}</span></summary>
+          {% for group in finding_groups %}
+            <section class="finding-group">
+              <h4 class="brief-label">{{ group.label }}</h4>
+              <ul class="findings">
+                {% for f in group.items %}
+                  <li class="finding">
+                    <div class="finding-head">
+                      <h5>{{ f.theme }}</h5>
+                      <a class="source" href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title|default:"Source" }}{% if f.source_date %}, {{ f.source_date }}{% endif %}</a>
+                    </div>
+                    <p>{{ f.what_people_want }}</p>
+                    <dl class="finding-facts">
+                      <div><dt>Evidence</dt><dd>{{ f.evidence }}</dd></div>
+                      {% if f.seasons_observed %}<div><dt>Seen in</dt><dd>{{ f.seasons_observed }}</dd></div>{% endif %}
+                      {% if f.relevance %}<div><dt>For Malina</dt><dd>{{ f.relevance }}</dd></div>{% endif %}
+                    </dl>
+                  </li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endfor %}
+          {% if dropped_findings %}
+            <section class="finding-group">
+              <h4 class="brief-label">Left out: source not confirmed</h4>
+              <ul class="findings">
+                {% for f in dropped_findings %}
+                  <li class="finding is-dropped"><div class="finding-head"><h5>{{ f.theme }}</h5></div><p>{{ f.what_people_want }}</p></li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endif %}
+          <p class="meta">Every source link was returned by the search itself. A finding whose link could not be confirmed is kept out of the brief.</p>
+        </details>
+      {% endif %}
+
+      {% if signals %}
+        <details class="fold fold-evidence">
+          <summary>What your audience said <span class="chips"><span class="chip">{{ intent_counts.purchase }} asked to buy</span><span class="chip">{{ intent_counts.interest }} showed interest</span></span></summary>
+          <div class="tally">
+            <button type="button" class="tally-cell is-active" data-filter="all"><strong>{{ signals|length }}</strong> signals</button>
+            <button type="button" class="tally-cell tally-purchase" data-filter="purchase"><strong>{{ intent_counts.purchase }}</strong> asked to buy</button>
+            <button type="button" class="tally-cell" data-filter="interest"><strong>{{ intent_counts.interest }}</strong> showed interest</button>
+            <button type="button" class="tally-cell" data-filter="trend"><strong>{{ intent_counts.trend }}</strong> external trend</button>
+          </div>
+          {% if product_counts %}
+            <p class="meta">Most mentioned: {% for name, count in product_counts %}{{ name }} ({{ count }}){% if not forloop.last %}, {% endif %}{% endfor %}</p>
+          {% endif %}
+          <div class="table-wrap">
+            <table class="signals" id="signals-table">
+              <thead><tr><th>Intent</th><th>Product</th><th>Technique</th><th>Quote</th><th>Source</th></tr></thead>
+              <tbody>
+                {% for s in signals %}
+                  <tr data-intent="{{ s.intent }}">
+                    <td><span class="intent intent-{{ s.intent }}">{{ s.intent|label }}</span></td>
+                    <td>{{ s.product_type|default:"Not stated" }}</td>
+                    <td>{{ s.technique|default:"Not stated" }}</td>
+                    <td class="quote">{% if s.quote %}"{{ s.quote }}"{% endif %}</td>
+                    <td>{{ s.source|label }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
       {% endif %}
     </section>
 

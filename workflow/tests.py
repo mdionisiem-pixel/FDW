@@ -25,10 +25,12 @@ class ScriptedClient:
         self.source_urls = dryrun.sample_source_urls() if source_urls is None else source_urls
         self.searches = searches
         self.calls = []
+        self.max_tokens_seen = []
         self.search_calls = 0
 
     def complete(self, step, prompt, model, max_tokens, web_search_max=0):
         self.calls.append(step)
+        self.max_tokens_seen.append(max_tokens)
         queue = self.script.get(step)
         text = queue.pop(0) if queue else dryrun.respond(step, prompt)
         if web_search_max > 0:
@@ -219,7 +221,7 @@ class ResearchTests(TestCase):
         stages.decide_brief(brief, "approve")
         cycle.refresh_from_db()
         stages.run_stage2(cycle, client=ScriptedClient())
-        generator_call = ModelCall.objects.get(cycle=cycle, step="generate_concepts")
+        generator_call = ModelCall.objects.get(cycle=cycle, step="plan_concepts")
         self.assertIn("Bold winter accessories", generator_call.prompt)
 
     def test_search_cost_is_recorded(self):
@@ -255,7 +257,7 @@ class ResearchTests(TestCase):
         stages.decide_brief(brief, "approve")
         cycle.refresh_from_db()
         stages.run_stage2(cycle, client=ScriptedClient())
-        self.assertIn("Autumn/Winter 2027", ModelCall.objects.get(cycle=cycle, step="generate_concepts").prompt)
+        self.assertIn("Autumn/Winter 2027", ModelCall.objects.get(cycle=cycle, step="plan_concepts").prompt)
 
     def test_without_a_season_the_research_is_told_to_pick_the_next_one(self):
         cycle = Cycle.objects.create(name="No season")
@@ -275,6 +277,53 @@ class ResearchTests(TestCase):
         data["findings"][0]["timeframe"] = "probably recurring"
         with self.assertRaises(schemas.SchemaError):
             schemas.validate_findings(data)
+
+    def _brief_citing(self, url):
+        return json.dumps({
+            "season": "Autumn/Winter", "summary": "Summary.",
+            "themes": [{
+                "name": "Theme", "what_people_want": "Want.", "strength": "weak",
+                "strength_reason": "One source.", "timeframe": "current", "basis": ["web_research"],
+                "sources": [{"title": "A page", "url": url}], "audience_signals": None,
+            }],
+            "season_view": {"returns_every_year": [], "new_this_year": ["Theme"], "fading": []},
+            "direction": {"verdict": "none_given", "explanation": None},
+            "past_tests": "None yet.", "gaps": [], "conflicts": [],
+        })
+
+    def test_brief_is_stored_as_structure_and_as_text_for_the_designer(self):
+        cycle = Cycle.objects.create(name="Structured")
+        brief = stages.run_stage1(cycle, client=ScriptedClient())
+        self.assertEqual(brief.data["themes"][0]["strength"], "moderate")  # strongest first
+        self.assertIn("Demand themes, strongest first:", brief.text)
+        self.assertIn("Season view:", brief.text)
+        stages.decide_brief(brief, "approve")
+        cycle.refresh_from_db()
+        stages.run_stage2(cycle, client=ScriptedClient())
+        prompt = ModelCall.objects.get(cycle=cycle, step="plan_concepts").prompt
+        self.assertIn("Chunky hand-knit accessories [evidence: moderate", prompt)
+
+    def test_brief_may_only_cite_sources_from_the_findings(self):
+        good_url = dryrun.sample_source_urls()[0]
+        cycle = Cycle.objects.create(name="Cited ok")
+        client = ScriptedClient({"demand_brief": [self._brief_citing("https://elsewhere.example.net/x"),], "demand_brief_retry": [self._brief_citing(good_url)]})
+        brief = stages.run_stage1(cycle, client=client)
+        self.assertEqual(brief.data["themes"][0]["sources"][0]["url"], good_url)
+        self.assertIn("demand_brief_retry", client.calls)
+
+        cycle2 = Cycle.objects.create(name="Cited badly twice")
+        bad = self._brief_citing("https://elsewhere.example.net/x")
+        with self.assertRaises(StageError):
+            stages.run_stage1(cycle2, client=ScriptedClient({"demand_brief": [bad], "demand_brief_retry": [bad]}))
+        cycle2.refresh_from_db()
+        self.assertEqual(cycle2.status, Cycle.Status.NEW)
+        self.assertEqual(cycle2.briefs.count(), 0)
+
+    def test_brief_with_an_unknown_strength_is_rejected(self):
+        data = json.loads(self._brief_citing(dryrun.sample_source_urls()[0]))
+        data["themes"][0]["strength"] = "very strong"
+        with self.assertRaises(schemas.SchemaError):
+            schemas.validate_brief(data, None)
 
     def test_urls_are_compared_without_scheme_or_trailing_slash(self):
         self.assertEqual(
@@ -392,17 +441,18 @@ class Stage2Tests(TestCase):
     def test_den_notes_reach_the_generator_prompt(self):
         cycle = approved_cycle()
         stages.run_stage2(cycle, client=DryRunClient())
-        call = ModelCall.objects.filter(cycle=cycle, step="generate_concepts").first()
+        call = ModelCall.objects.filter(cycle=cycle, step="plan_concepts").first()
         self.assertIn("Focus on knitwear", call.prompt)
 
-    def _concepts_with_bad_route(self):
-        data = json.loads(dryrun.respond("generate_concepts", ""))
-        data["concepts"][0]["pieces"][0]["production_route"] = "on_demand"
-        return data
+    def _concept_with_bad_route(self):
+        """The first sample concept, with a hand technique on a machine route."""
+        concept = json.loads(dryrun.respond("generate_concepts", ""))["concepts"][0]
+        concept["pieces"][0]["production_route"] = "on_demand"
+        return concept
 
     def test_code_rule_triggers_one_revision_that_fixes_it(self):
         cycle = approved_cycle()
-        client = ScriptedClient({"generate_concepts": [json.dumps(self._concepts_with_bad_route())]})
+        client = ScriptedClient({"detail_concept": [json.dumps(self._concept_with_bad_route())]})
         concepts = stages.run_stage2(cycle, client=client)
         first = concepts[0]
         self.assertEqual(client.calls.count("revise_concept"), 1)
@@ -413,10 +463,10 @@ class Stage2Tests(TestCase):
 
     def test_issue_that_survives_revision_is_marked_unresolved(self):
         cycle = approved_cycle()
-        bad = self._concepts_with_bad_route()
-        still_bad = copy.deepcopy(bad["concepts"][0])
+        bad = self._concept_with_bad_route()
+        still_bad = copy.deepcopy(bad)
         client = ScriptedClient({
-            "generate_concepts": [json.dumps(bad)],
+            "detail_concept": [json.dumps(bad)],
             "revise_concept": [json.dumps(still_bad)],
         })
         concepts = stages.run_stage2(cycle, client=client)
@@ -424,6 +474,36 @@ class Stage2Tests(TestCase):
         self.assertEqual(client.calls.count("revise_concept"), 1)  # never loops
         self.assertTrue(concepts[0].latest_review.data["blocking_issues"])
         self.assertNotEqual(concepts[0].latest_review.overall, "recommend")
+
+    def test_concepts_are_planned_once_then_specified_one_at_a_time(self):
+        cycle = approved_cycle()
+        client = ScriptedClient()
+        stages.run_stage2(cycle, client=client)
+        self.assertEqual(client.calls.count("plan_concepts"), 1)
+        self.assertEqual(client.calls.count("detail_concept"), 3)
+        # No single answer is asked to hold three full collections.
+        self.assertLessEqual(max(client.max_tokens_seen), 12000)
+
+    def test_specified_concept_must_keep_the_planned_pieces(self):
+        cycle = approved_cycle()
+        drifted = json.loads(dryrun.respond("generate_concepts", ""))["concepts"][0]
+        drifted["pieces"][0]["piece_id"] = "C1-P9"
+        client = ScriptedClient({"detail_concept": [json.dumps(drifted)]})
+        concepts = stages.run_stage2(cycle, client=client)
+        self.assertIn("detail_concept_retry", client.calls)
+        self.assertEqual(
+            sorted(p["piece_id"] for p in concepts[0].data["pieces"]),
+            ["C1-P1", "C1-P2", "C1-P3", "C1-P4", "C1-P5"],
+        )
+
+    def test_season_and_plan_reach_the_specifying_step(self):
+        cycle = approved_cycle()
+        cycle.season, cycle.season_year = "autumn_winter", 2027
+        cycle.save()
+        stages.run_stage2(cycle, client=ScriptedClient())
+        prompt = ModelCall.objects.filter(cycle=cycle, step="detail_concept").last().prompt
+        self.assertIn("Autumn/Winter 2027", prompt)
+        self.assertIn('"concept_id": "C1"', prompt)
 
     def test_selecting_one_concept_creates_its_pieces(self):
         cycle = approved_cycle()
@@ -526,7 +606,9 @@ class ScreenTests(TestCase):
         cycle = Cycle.objects.create(name="No input")
         self.client.post(reverse("run_stage1", args=[cycle.pk]))
         page = self.client.get(reverse("cycle_detail", args=[cycle.pk]))
-        self.assertContains(page, "What the research found")
+        self.assertContains(page, "Demand themes, strongest first")
+        self.assertContains(page, "Season view")
+        self.assertContains(page, "Sources behind the brief")
         self.assertContains(page, "Gate 1: your decision")
 
     def test_season_is_saved_and_bad_values_are_refused(self):
@@ -582,6 +664,14 @@ class ScreenTests(TestCase):
         self.client.post(reverse("save_direction", args=[cycle.pk]), {"direction": "Changed"})
         cycle.refresh_from_db()
         self.assertEqual(cycle.direction, "Hats and gloves")
+
+    def test_older_text_only_brief_still_displays(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="Old brief", status=Cycle.Status.BRIEF_PENDING)
+        DemandBrief.objects.create(cycle=cycle, text="An earlier brief written as plain text.")
+        page = self.client.get(reverse("cycle_detail", args=[cycle.pk]))
+        self.assertContains(page, "An earlier brief written as plain text.")
+        self.assertContains(page, "Gate 1: your decision")
 
     def test_stage_endpoints_reject_get(self):
         self.client.force_login(self.user)

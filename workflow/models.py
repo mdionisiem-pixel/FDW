@@ -196,6 +196,9 @@ class DemandBrief(models.Model):
         REJECTED = "rejected", "Rejected"
 
     cycle = models.ForeignKey(Cycle, on_delete=models.CASCADE, related_name="briefs")
+    # ``data`` is the structured brief shown on screen. ``text`` is the same
+    # content as plain text, which is what the designer step reads.
+    data = models.JSONField(null=True, blank=True)
     text = models.TextField()
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
     founder_notes = models.TextField(blank=True)

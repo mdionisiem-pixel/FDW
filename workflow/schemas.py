@@ -111,6 +111,81 @@ def validate_findings(data):
     return data
 
 
+BRIEF_STRENGTHS = ("strong", "moderate", "weak", "untested")
+BRIEF_TIMEFRAMES = {"recurring", "current", "both", "not_applicable"}
+BRIEF_BASES = {"web_research", "audience_signals", "founder_direction"}
+DIRECTION_VERDICTS = {"supported", "mixed", "contradicted", "untested", "none_given"}
+
+
+def _string_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(v, str) for v in value)
+
+
+def validate_brief(data, allowed_urls=None):
+    """Validate the structured research brief.
+
+    ``allowed_urls`` is the set of normalised URLs of the verified findings.
+    A source in the brief must be one of them, so the brief cannot cite a page
+    that the research did not actually return.
+    """
+    if not isinstance(data, dict):
+        raise SchemaError(["Expected a JSON object for the brief."])
+    problems = []
+    for field in ("season", "summary", "past_tests"):
+        if not _is_text(data.get(field)):
+            problems.append(f"{field} is missing or empty")
+    themes = data.get("themes")
+    if not isinstance(themes, list) or not 1 <= len(themes) <= 5:
+        problems.append("themes must be a list of one to five themes")
+        themes = []
+    for i, theme in enumerate(themes):
+        where = f"theme {i + 1}"
+        if not isinstance(theme, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        for field in ("name", "what_people_want", "strength_reason"):
+            if not _is_text(theme.get(field)):
+                problems.append(f"{where}: {field} is missing or empty")
+        if theme.get("strength") not in BRIEF_STRENGTHS:
+            problems.append(f"{where}: strength must be one of {list(BRIEF_STRENGTHS)}")
+        if theme.get("timeframe") not in BRIEF_TIMEFRAMES:
+            problems.append(f"{where}: timeframe must be one of {sorted(BRIEF_TIMEFRAMES)}")
+        basis = theme.get("basis")
+        if not isinstance(basis, list) or not basis or not set(basis) <= BRIEF_BASES:
+            problems.append(f"{where}: basis must list one or more of {sorted(BRIEF_BASES)}")
+            basis = []
+        sources = theme.get("sources")
+        if not isinstance(sources, list):
+            problems.append(f"{where}: sources must be a list")
+            sources = []
+        for source in sources:
+            if not isinstance(source, dict) or not _is_text(source.get("title")) or not _is_text(source.get("url")):
+                problems.append(f"{where}: every source needs a title and a url")
+            elif allowed_urls is not None and normalise_url(source["url"]) not in allowed_urls:
+                problems.append(
+                    f"{where}: source {source['url']} is not one of the research findings; "
+                    "cite only URLs that appear in the findings"
+                )
+        if "web_research" in basis and not sources:
+            problems.append(f"{where}: a theme resting on web research must list its sources")
+    season_view = data.get("season_view")
+    if not isinstance(season_view, dict):
+        problems.append("season_view must be an object")
+    else:
+        for key in ("returns_every_year", "new_this_year", "fading"):
+            if not _string_list(season_view.get(key)):
+                problems.append(f"season_view.{key} must be a list of short strings")
+    direction = data.get("direction")
+    if not isinstance(direction, dict) or direction.get("verdict") not in DIRECTION_VERDICTS:
+        problems.append(f"direction.verdict must be one of {sorted(DIRECTION_VERDICTS)}")
+    for key in ("gaps", "conflicts"):
+        if not _string_list(data.get(key)):
+            problems.append(f"{key} must be a list of strings")
+    if problems:
+        raise SchemaError(problems)
+    return data
+
+
 def _validate_piece(piece, where, problems):
     if not isinstance(piece, dict):
         problems.append(f"{where}: must be an object")
@@ -187,6 +262,83 @@ def validate_concepts(data):
     ids = [c.get("concept_id") for c in concepts if isinstance(c, dict)]
     if len(set(ids)) != len(ids):
         problems.append("concept_id values must be unique.")
+    if problems:
+        raise SchemaError(problems)
+    return data
+
+
+PLAN_PIECE_FIELDS = ("piece_id", "name", "category", "technique", "idea")
+
+
+def validate_concept_plans(data):
+    """Validate the three concept plans from the planning step."""
+    if not isinstance(data, dict) or not isinstance(data.get("concepts"), list):
+        raise SchemaError(['Expected an object with a "concepts" list.'])
+    concepts = data["concepts"]
+    problems = []
+    if len(concepts) != 3:
+        problems.append(f"Expected exactly three concepts, got {len(concepts)}.")
+    for i, concept in enumerate(concepts):
+        where = f"concept {i + 1}"
+        if not isinstance(concept, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        for field in ("concept_id", "name", "theme", "target_customer", "signature_detail", "why_now", "basis"):
+            if not _is_text(concept.get(field)):
+                problems.append(f"{where}: {field} is missing or empty")
+        palette = concept.get("palette")
+        if not isinstance(palette, list) or not palette or not all(
+            isinstance(c, dict) and _is_text(c.get("name")) and HEX.match(str(c.get("hex", ""))) for c in palette
+        ):
+            problems.append(f"{where}: every palette colour needs a name and a hex value like #A1B2C3")
+        pieces = concept.get("pieces")
+        if not isinstance(pieces, list) or not 4 <= len(pieces) <= 6:
+            problems.append(f"{where}: must have four to six pieces")
+            continue
+        for j, piece in enumerate(pieces):
+            piece_where = f"{where}, piece {j + 1}"
+            if not isinstance(piece, dict):
+                problems.append(f"{piece_where}: must be an object")
+                continue
+            for field in PLAN_PIECE_FIELDS:
+                if not _is_text(piece.get(field)):
+                    problems.append(f"{piece_where}: {field} is missing or empty")
+            if piece.get("role") not in ROLES:
+                problems.append(f"{piece_where}: role must be one of {sorted(ROLES)}")
+            if piece.get("production_route") not in ROUTES:
+                problems.append(f"{piece_where}: production_route must be one of {sorted(ROUTES)}")
+            price = piece.get("target_price_eur")
+            if not _is_number(price) or price <= 0:
+                problems.append(f"{piece_where}: target_price_eur must be a number above zero")
+        roles = [p.get("role") for p in pieces if isinstance(p, dict)]
+        if roles.count("hero") != 1:
+            problems.append(f"{where}: must have exactly one hero piece")
+        if roles.count("accessory") < 1:
+            problems.append(f"{where}: must have at least one accessory")
+        ids = [p.get("piece_id") for p in pieces if isinstance(p, dict)]
+        if len(set(ids)) != len(ids):
+            problems.append(f"{where}: piece_id values must be unique")
+    ids = [c.get("concept_id") for c in concepts if isinstance(c, dict)]
+    if len(set(ids)) != len(ids):
+        problems.append("concept_id values must be unique.")
+    if problems:
+        raise SchemaError(problems)
+    return data
+
+
+def validate_concept_against_plan(data, plan):
+    """Validate a fully specified concept and check it kept to its plan."""
+    problems = validate_concept(data)
+    if isinstance(data, dict) and not problems:
+        if data.get("concept_id") != plan["concept_id"]:
+            problems.append(f"concept_id must stay {plan['concept_id']}")
+        planned = {p["piece_id"] for p in plan["pieces"]}
+        written = {p.get("piece_id") for p in data.get("pieces", [])}
+        if planned != written:
+            problems.append(
+                "the pieces must be exactly those in the plan: "
+                f"expected {sorted(planned)}, got {sorted(str(w) for w in written)}"
+            )
     if problems:
         raise SchemaError(problems)
     return data
