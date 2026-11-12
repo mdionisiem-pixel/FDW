@@ -13,6 +13,7 @@ job that is either waiting, made or failed.
 import base64
 import json
 import random
+import ssl
 import string
 import time
 import urllib.error
@@ -206,6 +207,21 @@ def queue_images(piece: BakeoffPiece, models_wanted) -> int:
 # --- Step 3: make the images, one per request ------------------------------------
 
 
+def _tls_context() -> ssl.SSLContext:
+    """A verified TLS context that works on every platform.
+
+    Python from python.org on macOS does not read the system's certificates,
+    so plain urllib fails with CERTIFICATE_VERIFY_FAILED there. The certifi
+    bundle, which the Anthropic library already uses, fixes that. Verification
+    stays on in every case.
+    """
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 class OpenRouterImages:
     """Image generation through OpenRouter's images endpoint."""
 
@@ -218,6 +234,7 @@ class OpenRouterImages:
                 "to try the bake-off with sample images."
             )
         self.base = settings.OPENROUTER_BASE_URL.rstrip("/")
+        self.tls = _tls_context()
 
     def _request(self, method, path, payload=None, timeout=IMAGE_TIMEOUT_SECONDS):
         body = json.dumps(payload).encode() if payload is not None else None
@@ -230,12 +247,18 @@ class OpenRouterImages:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout, context=self.tls) as response:
                 raw = response.read(MAX_IMAGE_BYTES * 2)
         except urllib.error.HTTPError as exc:
             detail = exc.read(2000).decode("utf-8", "replace")
             raise BakeoffError(f"OpenRouter returned {exc.code}: {detail[:400]}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
+            reason = getattr(exc, "reason", exc)
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                raise BakeoffError(
+                    "Could not verify OpenRouter's security certificate. Run "
+                    "'pip install --upgrade certifi' in the app's environment and try again."
+                ) from exc
             raise BakeoffError(f"Could not reach OpenRouter: {exc}") from exc
         try:
             return json.loads(raw)
