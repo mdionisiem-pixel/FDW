@@ -60,4 +60,69 @@
     boxes.forEach(function (box) { box.addEventListener("change", update); });
     update();
   }
+
+  // Image test: make waiting images one request at a time, so a slow model
+  // never holds one long request open, and progress is visible.
+  var make = document.getElementById("make");
+  var makeButton = document.getElementById("make-button");
+  if (make && makeButton) {
+    var token = make.querySelector("input[name=csrfmiddlewaretoken]").value;
+    var fill = document.getElementById("make-fill");
+    var status = document.getElementById("make-status");
+    var show = function (p) {
+      var finished = p.done + p.failed;
+      fill.style.width = (p.total ? Math.round(finished / p.total * 100) : 0) + "%";
+      status.textContent = p.done + " made, " + p.failed + " failed, " + p.waiting + " waiting.";
+    };
+    var step = function () {
+      fetch(make.getAttribute("data-url"), {
+        method: "POST",
+        headers: { "X-CSRFToken": token, "X-Requested-With": "fetch" },
+        credentials: "same-origin"
+      }).then(function (response) {
+        return response.json().then(function (body) { return { ok: response.ok, body: body }; });
+      }).then(function (result) {
+        if (result.body.progress) show(result.body.progress);
+        if (!result.ok) {
+          status.textContent = result.body.error || "Generation stopped.";
+          makeButton.disabled = false;
+          makeButton.textContent = "Continue";
+          return;
+        }
+        if (result.body.finished) {
+          status.textContent += " Done. Loading the images.";
+          window.location.reload();
+          return;
+        }
+        step();
+      }).catch(function () {
+        status.textContent = "The connection dropped. Press Continue to carry on; nothing made so far is lost.";
+        makeButton.disabled = false;
+        makeButton.textContent = "Continue";
+      });
+    };
+    makeButton.addEventListener("click", function () {
+      makeButton.disabled = true;
+      makeButton.textContent = "Making images";
+      step();
+    });
+  }
+
+  // Image test: save scores without leaving the page.
+  document.querySelectorAll(".score-form").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      var saved = form.querySelector(".score-saved");
+      fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        headers: { "X-Requested-With": "fetch" },
+        credentials: "same-origin"
+      }).then(function (response) { return response.json(); }).then(function (body) {
+        saved.textContent = body.ok ? "Saved" : (body.error || "Not saved");
+        var card = form.closest(".score-card");
+        if (card) card.classList.toggle("is-scored", !!body.ok);
+      }).catch(function () { saved.textContent = "Not saved. Check the connection."; });
+    });
+  });
 })();

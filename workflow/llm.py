@@ -54,11 +54,12 @@ class AnthropicClient:
         )
 
     def complete(self, step: str, prompt: str, model: str, max_tokens: int,
-                 web_search_max: int = 0) -> LLMResult:
+                 web_search_max: int = 0, images=None) -> LLMResult:
         """Run one request. With ``web_search_max`` above zero the model may search the web.
 
         Web search is the only tool ever offered, and only to the research
         step, so text found on a web page has nothing else it could trigger.
+        ``images`` is an optional list of (media_type, base64 data) the model can look at.
         """
         kwargs = {"model": model, "max_tokens": max_tokens}
         if web_search_max > 0:
@@ -67,7 +68,14 @@ class AnthropicClient:
                 "name": "web_search",
                 "max_uses": web_search_max,
             }]
-        messages = [{"role": "user", "content": prompt}]
+        if images:
+            content = [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}}
+                for media_type, data in images
+            ] + [{"type": "text", "text": prompt}]
+        else:
+            content = prompt
+        messages = [{"role": "user", "content": content}]
         result = LLMResult("", 0, 0)
         for _ in range(MAX_PAUSE_CONTINUATIONS + 1):
             try:
@@ -116,7 +124,7 @@ class DryRunClient:
     dry_run = True
 
     def complete(self, step: str, prompt: str, model: str, max_tokens: int,
-                 web_search_max: int = 0) -> LLMResult:
+                 web_search_max: int = 0, images=None) -> LLMResult:
         text = dryrun.respond(step, prompt)
         urls = dryrun.sample_source_urls() if web_search_max > 0 else []
         return LLMResult(text, len(prompt) // 4, len(text) // 4,

@@ -65,6 +65,26 @@ is not confirmed here that the configured model supports it; if it does not, sta
 shows the API's error and saves nothing. Run one small cycle first and check
 the "Model calls" record on the cycle page.
 
+## Image model test
+
+The Image test page compares image-generation models on pieces you have already made.
+
+1. Add a piece with a front photo, and ideally detail and worn photos.
+2. Claude studies the photos and writes a precise description, a scoring checklist and
+   three shot prompts. The image models never see your photos, only the prompts, as they
+   will for new designs.
+3. Each chosen model draws a front packshot from the prompt alone, then a detail close-up
+   and an on-model shot using its own packshot as reference.
+4. You score each image against your real photo, 1 to 5 on four points, without seeing
+   which model made it.
+5. Results rank the models by how closely they matched your pieces, with cost and speed.
+
+Image generation goes through OpenRouter. Set `OPENROUTER_API_KEY` in `.env`, and choose
+the models in `FDW_BAKEOFF_MODELS`; "Check available models" lists what your key can
+reach. Spending stops at `FDW_BAKEOFF_LIMIT_USD` (default $10). Photos and generated
+images are stored in `media/`, which is not committed, and are shown only to signed-in
+users.
+
 ## Guardrails
 
 These are enforced in code, not by prompts.

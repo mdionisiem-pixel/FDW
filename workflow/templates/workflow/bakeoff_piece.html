@@ -1,0 +1,140 @@
+{% extends "workflow/base.html" %}
+{% block title %}{{ piece.name }} | Image test | Malina studio{% endblock %}
+{% block content %}
+<section class="page">
+  <p class="crumb"><a href="{% url 'bakeoff_home' %}">Image test</a></p>
+  <div class="page-head">
+    <div>
+      <h1>{{ piece.name }}</h1>
+      <p class="lede">{% if progress.total %}{{ progress.done }} of {{ progress.total }} images made, {{ progress.scored }} scored{% else %}No images yet{% endif %}</p>
+    </div>
+    <div class="spend" aria-label="Bake-off spend">
+      <p class="spend-figure">${{ spent|floatformat:2 }} <span>of ${{ limit|floatformat:2 }} limit</span></p>
+      <p class="meta">For the whole image test.</p>
+    </div>
+  </div>
+
+  <div class="stage">
+    <h2>The real piece</h2>
+    <div class="photo-row">
+      {% for field, label, file in piece.photos %}
+        <figure><img src="{% url 'bakeoff_photo' piece.pk field %}" alt="{{ label }} photo of {{ piece.name }}" loading="lazy"><figcaption>{{ label }}</figcaption></figure>
+      {% endfor %}
+    </div>
+    {% if piece.notes %}<p class="note note-plain"><strong>Your notes:</strong> {{ piece.notes }}</p>{% endif %}
+  </div>
+
+  <div class="stage">
+    <h2>Description and prompts</h2>
+    {% if piece.spec %}
+      <p class="brief-summary">{{ piece.spec.description }}</p>
+      <div class="panel-pair">
+        <section>
+          <h4 class="brief-label">What to check when scoring</h4>
+          <ul class="plain-list">{% for c in piece.spec.checklist %}<li>{{ c }}</li>{% endfor %}</ul>
+        </section>
+        <section>
+          {% if piece.spec.unclear_from_photos %}
+            <h4 class="brief-label">Claude could not tell from the photos</h4>
+            <ul class="plain-list">{% for c in piece.spec.unclear_from_photos %}<li>{{ c }}</li>{% endfor %}</ul>
+          {% endif %}
+        </section>
+      </div>
+      <details class="fold">
+        <summary>The three prompts every model receives</summary>
+        <dl class="prompts">
+          <div><dt>Front packshot</dt><dd>{{ piece.spec.prompts.A }}</dd></div>
+          <div><dt>Detail close-up</dt><dd>{{ piece.spec.prompts.C }}</dd></div>
+          <div><dt>On a model</dt><dd>{{ piece.spec.prompts.D }}</dd></div>
+        </dl>
+      </details>
+    {% else %}
+      <p class="stage-intro">Claude looks at your photos and writes a precise physical description, a checklist for scoring, and the prompts. The image models never see your photos; they only get the prompts, just as they will for new designs.</p>
+      <form method="post" action="{% url 'bakeoff_describe' piece.pk %}" data-working="Claude is studying the photos and writing the prompts">
+        {% csrf_token %}
+        <button class="btn btn-primary" type="submit">Describe the piece and write prompts</button>
+      </form>
+    {% endif %}
+  </div>
+
+  {% if piece.spec %}
+    <div class="stage">
+      <h2>Make the images</h2>
+      <form class="model-pick" method="post" action="{% url 'bakeoff_queue' piece.pk %}">
+        {% csrf_token %}
+        <fieldset>
+          <legend>Models to compare</legend>
+          {% for m in default_models %}
+            <label class="check"><input type="checkbox" name="models" value="{{ m }}" {% if m in queued_models %}checked disabled{% else %}checked{% endif %}> <code>{{ m }}</code>{% if m in queued_models %} <span class="meta">queued</span>{% endif %}</label>
+          {% endfor %}
+          {% for m in queued_models %}{% if m not in default_models %}<label class="check"><input type="checkbox" checked disabled> <code>{{ m }}</code> <span class="meta">queued</span></label>{% endif %}{% endfor %}
+        </fieldset>
+        <label for="extra-model">Add another model, optional</label>
+        <input id="extra-model" type="text" name="extra_model" placeholder="provider/model-name" maxlength="120">
+        <button class="btn" type="submit">Queue images</button>
+      </form>
+
+      {% if progress.total %}
+        <div class="make" id="make" data-url="{% url 'bakeoff_make_next' piece.pk %}">
+          <div class="spend-track make-track" role="progressbar" aria-valuemin="0" aria-valuemax="{{ progress.total }}" aria-valuenow="{{ progress.done|add:progress.failed }}">
+            <div class="spend-fill" id="make-fill" style="width: {% widthratio progress.done|add:progress.failed progress.total 100 %}%"></div>
+          </div>
+          <p class="meta" id="make-status">{{ progress.done }} made, {{ progress.failed }} failed, {{ progress.waiting }} waiting.</p>
+          {% csrf_token %}
+          {% if progress.waiting %}<button class="btn btn-primary" type="button" id="make-button">Make images</button>{% endif %}
+          {% if progress.failed %}
+            <form method="post" action="{% url 'bakeoff_retry' piece.pk %}">{% csrf_token %}<button class="btn" type="submit">Try failed images again</button></form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% for shot in shots %}
+    <div class="stage">
+      <h2>{{ shot.label }}</h2>
+      <p class="stage-intro">Score each image against your real piece. Model names stay hidden until the results page.</p>
+      <div class="score-grid">
+        {% if shot.photo_field %}
+          <figure class="score-card score-real">
+            <img src="{% url 'bakeoff_photo' piece.pk shot.photo_field %}" alt="Your photo" loading="lazy">
+            <figcaption><strong>Your real piece</strong></figcaption>
+          </figure>
+        {% endif %}
+        {% for image in shot.images %}
+          <figure class="score-card {% if image.is_scored %}is-scored{% endif %}" id="image-{{ image.pk }}">
+            {% if image.status == "done" %}
+              <a href="{% url 'bakeoff_image' image.pk %}" target="_blank" rel="noopener"><img src="{% url 'bakeoff_image' image.pk %}" alt="Image {{ image.code }}" loading="lazy"></a>
+            {% elif image.status == "failed" %}
+              <div class="score-empty score-failed"><p><strong>Failed</strong></p><p class="meta">{{ image.error|truncatechars:160 }}</p></div>
+            {% else %}
+              <div class="score-empty"><p class="meta">Waiting</p></div>
+            {% endif %}
+            <figcaption>
+              <p class="score-code">Image {{ image.code }}</p>
+              {% if image.status == "done" %}
+                <form class="score-form" method="post" action="{% url 'bakeoff_score' piece.pk image.pk %}">
+                  {% csrf_token %}
+                  {% for field, label in score_labels %}
+                    <fieldset class="rate">
+                      <legend>{{ label }}</legend>
+                      <div class="rate-row">
+                        {% for n in "12345" %}
+                          <label><input type="radio" name="{{ field }}" value="{{ n }}" {% if field == "matches_piece" and image.matches_piece|stringformat:"s" == n %}checked{% elif field == "material_realism" and image.material_realism|stringformat:"s" == n %}checked{% elif field == "colour_accuracy" and image.colour_accuracy|stringformat:"s" == n %}checked{% elif field == "photo_realism" and image.photo_realism|stringformat:"s" == n %}checked{% endif %} required><span>{{ n }}</span></label>
+                        {% endfor %}
+                      </div>
+                    </fieldset>
+                  {% endfor %}
+                  <div class="score-foot"><button class="btn" type="submit">Save scores</button><span class="meta score-saved" aria-live="polite">{% if image.is_scored %}Saved{% endif %}</span></div>
+                </form>
+              {% endif %}
+            </figcaption>
+          </figure>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if progress.scored %}<p><a class="btn btn-primary" href="{% url 'bakeoff_results' %}">See results</a></p>{% endif %}
+</section>
+{% endblock %}

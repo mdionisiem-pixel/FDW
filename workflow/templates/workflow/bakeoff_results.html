@@ -1,0 +1,73 @@
+{% extends "workflow/base.html" %}
+{% block title %}Image test results | Malina studio{% endblock %}
+{% block content %}
+<section class="page">
+  <p class="crumb"><a href="{% url 'bakeoff_home' %}">Image test</a></p>
+  <div class="page-head">
+    <div>
+      <h1>Image test results</h1>
+      <p class="lede">Models are ranked by how closely their images matched your real pieces, then by the average of all four scores. {{ scored }} of {{ total }} images scored.</p>
+    </div>
+    <div class="spend" aria-label="Bake-off spend">
+      <p class="spend-figure">${{ spent|floatformat:2 }} <span>of ${{ limit|floatformat:2 }} limit</span></p>
+    </div>
+  </div>
+
+  {% if scored < total %}
+    <aside class="callout"><p><strong>Not every image is scored yet.</strong> Seeing the ranking now can sway the scores you still give. Finish scoring first if you can.</p></aside>
+  {% endif %}
+
+  {% if rows %}
+    <div class="stage">
+      <div class="table-wrap">
+        <table class="compare results-table">
+          <thead>
+            <tr>
+              <th scope="col">Model</th>
+              {% for field, label in score_labels %}<th scope="col">{{ label }}</th>{% endfor %}
+              <th scope="col">Average</th>
+              <th scope="col" class="num">Scored</th>
+              <th scope="col" class="num">Failed</th>
+              <th scope="col" class="num">Cost per image</th>
+              <th scope="col" class="num">Seconds per image</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr {% if row.leader %}class="leader"{% endif %}>
+                <th scope="row"><code>{{ row.model }}</code>{% if row.leader %} <span class="verdict verdict-recommend">Leading</span>{% endif %}</th>
+                {% for field, label in score_labels %}
+                  {% for key, value in row.averages.items %}{% if key == field %}<td>{% if value is not None %}<span class="score-bar"><span style="width: {% widthratio value 5 100 %}%"></span></span>{{ value|floatformat:1 }}{% else %}–{% endif %}</td>{% endif %}{% endfor %}
+                {% endfor %}
+                <td><strong>{{ row.overall|default_if_none:"–" }}</strong></td>
+                <td class="num">{{ row.scored }}</td>
+                <td class="num">{{ row.failed }}</td>
+                <td class="num">{% if row.cost_per_image is not None %}${{ row.cost_per_image }}{% else %}<span class="meta">not reported</span>{% endif %}</td>
+                <td class="num">{{ row.seconds_per_image|default_if_none:"–" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="meta">Scores are your own, 1 to 5. Costs are as OpenRouter reported them. With only a few pieces, a difference under half a point is not a clear win.</p>
+    </div>
+
+    <div class="stage">
+      <h2>Which image was which</h2>
+      {% for piece in pieces %}
+        <details class="fold">
+          <summary>{{ piece.name }}</summary>
+          <div class="table-wrap">
+            <table class="mini">
+              <thead><tr><th>Shot</th><th>Image</th><th>Model</th><th class="num">Average score</th></tr></thead>
+              <tbody>{% for image in piece.images.all %}<tr><td>{{ image.get_shot_display }}</td><td>{{ image.code }}</td><td><code>{{ image.model }}</code></td><td class="num">{{ image.average_score|default_if_none:"–" }}</td></tr>{% endfor %}</tbody>
+            </table>
+          </div>
+        </details>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty"><h2>No results yet</h2><p>Add a piece, make the images and score them.</p></div>
+  {% endif %}
+</section>
+{% endblock %}

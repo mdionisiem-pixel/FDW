@@ -108,6 +108,12 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+
+# Uploaded photos and generated images. Served only to signed-in users,
+# through the app's own views, never as public files.
+MEDIA_ROOT = Path(os.environ.get("FDW_MEDIA_ROOT", BASE_DIR / "media"))
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 25 * 1024 * 1024
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LOGIN_URL = "/admin/login/"
@@ -146,3 +152,22 @@ FDW_SEARCH_PRICE_USD = Decimal(os.environ.get("FDW_SEARCH_PRICE_USD", "0.01"))
 # Hard cap on searches in one research run.
 FDW_RESEARCH_MAX_SEARCHES = int(os.environ.get("FDW_RESEARCH_MAX_SEARCHES", "12"))
 FDW_WEB_SEARCH_TOOL = os.environ.get("FDW_WEB_SEARCH_TOOL", "web_search_20250305")
+
+# --- Image generation (OpenRouter) and the image model bake-off ------------
+
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+
+# Image models to compare. Model names come from OpenRouter's comparison of
+# September 2026; use "Check available models" on the bake-off page to see
+# what your key can reach today, and change this list in .env.
+FDW_BAKEOFF_MODELS = [
+    m.strip() for m in os.environ.get(
+        "FDW_BAKEOFF_MODELS",
+        "openai/gpt-image-2,black-forest-labs/flux.2-pro,google/gemini-3.1-flash-image,google/gemini-3-pro-image",
+    ).split(",") if m.strip()
+]
+FDW_IMAGE_RESOLUTION = os.environ.get("FDW_IMAGE_RESOLUTION", "2K")
+# Hard stop for the whole bake-off, in US dollars. Image costs are as
+# reported by OpenRouter; the Claude call that writes the prompts counts too.
+FDW_BAKEOFF_LIMIT_USD = Decimal(os.environ.get("FDW_BAKEOFF_LIMIT_USD", "10"))
