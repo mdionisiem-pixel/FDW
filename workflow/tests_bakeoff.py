@@ -194,6 +194,28 @@ class OpenRouterTests(TestCase):
         with self.assertRaises(bakeoff.BakeoffError):
             client.generate("m/one", "prompt", [])
 
+    def test_requests_use_a_verified_certificate_bundle(self):
+        import ssl
+        import certifi
+
+        client = bakeoff.OpenRouterImages()
+        self.assertEqual(client.tls.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(client.tls.check_hostname)
+        self.assertGreater(len(client.tls.get_ca_certs()), 0)
+        self.assertTrue(certifi.where())
+
+    def test_certificate_failure_gets_a_clear_message(self):
+        import ssl
+        import urllib.error
+        from unittest import mock
+
+        client = bakeoff.OpenRouterImages()
+        error = urllib.error.URLError(ssl.SSLCertVerificationError(1, "certificate verify failed"))
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(bakeoff.BakeoffError) as ctx:
+                client.list_models()
+        self.assertIn("certifi", str(ctx.exception))
+
     @override_settings(OPENROUTER_API_KEY="")
     def test_missing_key_is_explained(self):
         with self.assertRaises(bakeoff.BakeoffError):
