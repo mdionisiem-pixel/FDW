@@ -74,6 +74,40 @@ def validate_signals(data):
     return data
 
 
+def normalise_url(url) -> str:
+    """Reduce a URL to a form that can be compared: no scheme, no trailing slash."""
+    text = str(url or "").strip()
+    for prefix in ("https://", "http://"):
+        if text.lower().startswith(prefix):
+            text = text[len(prefix):]
+            break
+    if text.lower().startswith("www."):
+        text = text[4:]
+    text = text.split("#", 1)[0].rstrip("/")
+    host, _, rest = text.partition("/")
+    return host.lower() + ("/" + rest if rest else "")
+
+
+def validate_findings(data):
+    if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
+        raise SchemaError(['Expected an object with a "findings" list.'])
+    problems = []
+    for i, item in enumerate(data["findings"]):
+        where = f"finding {i + 1}"
+        if not isinstance(item, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        for field in ("theme", "what_people_want", "evidence"):
+            if not _is_text(item.get(field)):
+                problems.append(f"{where}: {field} is missing or empty")
+        url = str(item.get("source_url") or "")
+        if not url.lower().startswith(("http://", "https://")):
+            problems.append(f"{where}: source_url must be a full web address")
+    if problems:
+        raise SchemaError(problems)
+    return data
+
+
 def _validate_piece(piece, where, problems):
     if not isinstance(piece, dict):
         problems.append(f"{where}: must be an object")
@@ -110,7 +144,7 @@ def validate_concept(concept, where="concept"):
     problems = []
     if not isinstance(concept, dict):
         return [f"{where}: must be an object"]
-    for field in ("concept_id", "name", "theme", "target_customer", "signature_detail", "why_now"):
+    for field in ("concept_id", "name", "theme", "target_customer", "signature_detail", "why_now", "basis"):
         if not _is_text(concept.get(field)):
             problems.append(f"{where}: {field} is missing or empty")
     palette = concept.get("palette")

@@ -55,11 +55,46 @@ def _extract_signals(prompt: str) -> str:
     return json.dumps(signals)
 
 
+SAMPLE_FINDINGS = [
+    ("Chunky hand-knit accessories", "Sample finding. Oversized hand-knit hats, balaclavas and mittens in undyed wool.",
+     "Sample evidence: a marketplace trend report names hand-knit winter accessories among its fastest-growing searches.",
+     "Sample marketplace trend report", "https://example.com/sample/marketplace-trends", "2026-10"),
+    ("Embroidered everyday knitwear", "Sample finding. Plain knit cardigans and vests with one small embroidered motif.",
+     "Sample evidence: a retailer reports embroidered knitwear selling out ahead of plain styles.",
+     "Sample retailer season report", "https://example.com/sample/retailer-report", "2026-09"),
+    ("Open crochet layering pieces", "Sample finding. Crochet tops, collars and overdresses worn over plain clothes.",
+     "Sample evidence: a trade article reports rising search interest in crochet layering for spring.",
+     "Sample trade press article", "https://example.com/sample/trade-article", "2026-10"),
+    ("Graphic two-colour jacquard", "Sample finding. Bold two-colour patterned knits at accessible prices.",
+     "Sample evidence: a resale platform lists patterned jacquard knits among its most-saved items.",
+     "Sample resale platform data", "https://example.com/sample/resale-data", "2026-08"),
+]
+
+
+def sample_source_urls() -> list:
+    return [f[4] for f in SAMPLE_FINDINGS]
+
+
+def _research(prompt: str) -> str:
+    findings = [
+        {"theme": t, "what_people_want": w, "evidence": e, "source_title": title,
+         "source_url": url, "source_date": date,
+         "relevance": "Sample relevance: fits craft techniques named in the brand brief."}
+        for t, w, e, title, url, date in SAMPLE_FINDINGS
+    ]
+    return json.dumps({"findings": findings, "searches_summary": "Sample searches; no web search was run."})
+
+
 def _demand_brief(prompt: str) -> str:
     try:
-        signals = json.loads(_between(prompt, "signals") or "[]")
+        signals = json.loads(_between(prompt, "audience_signals") or "[]")
     except json.JSONDecodeError:
         signals = []
+    try:
+        findings = json.loads(_between(prompt, "trend_findings") or "[]")
+    except json.JSONDecodeError:
+        findings = []
+    direction = _between(prompt, "founder_direction").strip()
     purchase = [s for s in signals if s.get("intent") == "purchase"]
     interest = [s for s in signals if s.get("intent") == "interest"]
     trend = [s for s in signals if s.get("intent") == "trend"]
@@ -79,22 +114,32 @@ def _demand_brief(prompt: str) -> str:
             return "moderate"
         return "weak"
 
+    has_direction = bool(direction) and not direction.lower().startswith("none given")
     lines = [
-        "SAMPLE DEMAND BRIEF (dry run: written by simple rules, not by a model)",
+        "SAMPLE RESEARCH BRIEF (dry run: written by simple rules, not by a model)",
         "",
-        f"Signals read: {len(signals)} in total. {len(purchase)} show purchase intent, "
-        f"{len(interest)} show interest, {len(trend)} are external trend data.",
+        f"Read: {len(findings)} web research findings and {len(signals)} audience signals "
+        f"({len(purchase)} purchase intent, {len(interest)} interest, {len(trend)} external).",
         "",
         "1. Top demand themes",
     ]
+    for f in findings[:5]:
+        lines.append(
+            f"- {f.get('theme')}: {f.get('what_people_want')} Rests on web research "
+            f"({f.get('source_title')}). Evidence: weak, single source."
+        )
     for name, c in ranked:
         quotes = "; ".join(f'"{q}"' for q in c["quotes"]) or "no quotes"
         lines.append(
             f"- {name.capitalize()}: {c['purchase']} purchase-intent and {c['interest']} interest "
             f"signals, {c['trend']} external. Evidence: {strength(c)}. Quotes: {quotes}."
         )
-    if not ranked:
-        lines.append("- No themes found. Add messages and run the stage again.")
+    lines += [
+        "",
+        "Founder's direction",
+        (f"Given: {direction} Evidence: untested until the price test." if has_direction
+         else "No direction was given."),
+    ]
     lines += [
         "",
         "2. Earlier price tests",
@@ -122,7 +167,7 @@ def _piece(cid, n, name, role, category, silhouette, technique, construction, ma
 
 
 def _sample_concepts() -> dict:
-    ev = ["Sample theme from the dry-run brief"]
+    ev = ["Sample theme from the dry-run research brief"]
     c1 = {
         "concept_id": "C1",
         "name": "Sample: Hedgerow",
@@ -133,6 +178,7 @@ def _sample_concepts() -> dict:
         "palette": [{"name": "Undyed ecru", "hex": "#E8E2D4"}, {"name": "Rosehip red", "hex": "#B3262E"},
                     {"name": "Bramble green", "hex": "#3F5B45"}],
         "why_now": "Sample evidence: purchase-intent messages about knitwear and embroidery.",
+        "basis": "Sample basis: web research on embroidered knitwear and hand-knit accessories; evidence weak, single sources.",
         "pieces": [
             _piece("C1", 1, "Hedgerow cardigan", "hero", "Cardigan", "Relaxed fit, hip length, V neck, drop shoulder",
                    "hand knit with hand embroidery", "Knitted flat in four panels, mattress-stitched seams, 6 cm 2x2 rib at hem and cuffs",
@@ -172,6 +218,7 @@ def _sample_concepts() -> dict:
         "signature_detail": "A diamond filet motif repeated at 3, 6 and 12 cm across the collection.",
         "palette": [{"name": "Chalk white", "hex": "#F5F3EE"}, {"name": "Ink blue", "hex": "#1F2A44"}],
         "why_now": "Sample evidence: interest signals mentioning crochet.",
+        "basis": "Sample basis: web research on crochet layering; evidence weak, single source.",
         "pieces": [
             _piece("C2", 1, "Lattice overdress", "hero", "Dress", "Straight, mid-calf, boat neck, sleeveless",
                    "crochet", "Worked in joined motifs from the hem up, crab-stitch edging",
@@ -204,6 +251,7 @@ def _sample_concepts() -> dict:
         "signature_detail": "A knitting-chart grid pattern, 2 cm squares, across every piece.",
         "palette": [{"name": "Signal red", "hex": "#C8102E"}, {"name": "Cream", "hex": "#F2EBDD"}],
         "why_now": "Sample evidence: purchase-intent messages asking for hats and scarves.",
+        "basis": "Sample basis: web research on jacquard knits; evidence weak, single source.",
         "pieces": [
             _piece("C3", 1, "Signal sweater", "hero", "Sweater", "Oversized, crew neck, hip length",
                    "machine jacquard knit", "Four jacquard panels, linked seams, 6 cm rib",
@@ -268,6 +316,10 @@ def respond(step: str, prompt: str) -> str:
     base = step.removesuffix("_retry")
     if base == "extract_signals":
         return _extract_signals(prompt)
+    if base == "research_trends":
+        return _research(prompt)
+    if base == "reformat_findings":
+        return _between(prompt, "text")
     if base == "demand_brief":
         return _demand_brief(prompt)
     if base == "generate_concepts":

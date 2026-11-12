@@ -37,64 +37,89 @@
 
     <!-- Stage 1 -->
     <section class="stage" id="stage-1" aria-labelledby="stage-1-title">
-      <h2 id="stage-1-title">Demand signals</h2>
-      <p class="stage-intro">Paste what people have actually said: messages asking the price, comments, post results, trend lines. One per line. Messages from your own audience count for most.</p>
+      <h2 id="stage-1-title">Market research</h2>
+      <p class="stage-intro">The app searches the web for what people are looking for and buying now, then writes a brief with its sources. You do not need to type anything. A direction of your own is optional.</p>
 
       {% if can_edit_items %}
-        <form class="paste" method="post" action="{% url 'add_items' cycle.pk %}">
+        <form class="direction" method="post" action="{% url 'save_direction' cycle.pk %}">
           {% csrf_token %}
-          <div class="paste-fields">
-            <div class="field field-grow">
-              <label for="items">Messages, one per line</label>
-              <textarea id="items" name="items" rows="5" placeholder="How much is the embroidered cardigan?&#10;Do you make these hats in green?" required></textarea>
-            </div>
-            <div class="field">
-              <label for="source">Where they came from</label>
-              <select id="source" name="source">
-                {% for value, name in sources %}<option value="{{ value }}">{{ name }}</option>{% endfor %}
-              </select>
-              <button class="btn" type="submit">Add to this cycle</button>
-            </div>
+          <label for="direction">Your direction or ideas, if you have any</label>
+          <textarea id="direction" name="direction" rows="3" placeholder="For example: winter accessories, hand-knit hats and gloves, something bolder than last year.">{{ cycle.direction }}</textarea>
+          <div class="form-foot">
+            <p class="meta">The research checks your direction first, then looks beyond it. At least one concept will develop it.</p>
+            <button class="btn" type="submit">Save direction</button>
           </div>
         </form>
-      {% endif %}
 
-      {% if raw_items %}
-        <details class="fold" {% if can_edit_items %}open{% endif %}>
-          <summary>
-            {{ raw_items|length }} item{{ raw_items|length|pluralize }} collected
-            <span class="chips">{% for name, count in source_counts %}<span class="chip">{{ name }} {{ count }}</span>{% endfor %}</span>
-          </summary>
-          <ul class="items">
-            {% for item in raw_items %}
-              <li>
-                <span class="chip chip-source">{{ item.get_source_display }}</span>
-                <span class="item-text">{{ item.text }}</span>
-                {% if can_edit_items %}
+        <form method="post" action="{% url 'run_stage1' cycle.pk %}" data-working="Researching the market and writing the brief">
+          {% csrf_token %}
+          <button class="btn btn-primary" type="submit">Research the market</button>
+        </form>
+
+        <details class="fold fold-optional">
+          <summary>Add audience messages, optional{% if raw_items %} <span class="chips">{% for name, count in source_counts %}<span class="chip">{{ name }} {{ count }}</span>{% endfor %}</span>{% endif %}</summary>
+          <p class="meta">Messages are reactions to pieces that already exist. They show taste and willingness to pay; they do not limit what gets designed.</p>
+          <form class="paste" method="post" action="{% url 'add_items' cycle.pk %}">
+            {% csrf_token %}
+            <div class="paste-fields">
+              <div class="field field-grow">
+                <label for="items">Messages, one per line</label>
+                <textarea id="items" name="items" rows="4" placeholder="How much is the embroidered cardigan?&#10;Do you make these hats in green?" required></textarea>
+              </div>
+              <div class="field">
+                <label for="source">Where they came from</label>
+                <select id="source" name="source">
+                  {% for value, name in sources %}<option value="{{ value }}">{{ name }}</option>{% endfor %}
+                </select>
+                <button class="btn" type="submit">Add to this cycle</button>
+              </div>
+            </div>
+          </form>
+          {% if raw_items %}
+            <ul class="items">
+              {% for item in raw_items %}
+                <li>
+                  <span class="chip chip-source">{{ item.get_source_display }}</span>
+                  <span class="item-text">{{ item.text }}</span>
                   <form method="post" action="{% url 'delete_item' cycle.pk item.pk %}">
                     {% csrf_token %}
                     <button class="link-btn" type="submit" aria-label="Remove this item">Remove</button>
                   </form>
-                {% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </details>
+      {% elif cycle.direction %}
+        <p class="note note-plain"><strong>Your direction:</strong> {{ cycle.direction }}</p>
+      {% endif %}
+
+      {% if findings %}
+        <div class="evidence">
+          <h3>What the research found</h3>
+          <ul class="findings">
+            {% for f in findings %}
+              <li class="finding {% if not f.verified %}is-dropped{% endif %}">
+                <div class="finding-head">
+                  <h4>{{ f.theme }}</h4>
+                  {% if f.verified %}
+                    <a class="source" href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title|default:"Source" }}{% if f.source_date %}, {{ f.source_date }}{% endif %}</a>
+                  {% else %}
+                    <span class="stamp stamp-rejected">Left out: source not confirmed</span>
+                  {% endif %}
+                </div>
+                <p>{{ f.what_people_want }}</p>
+                <p class="meta">{{ f.evidence }}</p>
               </li>
             {% endfor %}
           </ul>
-        </details>
-      {% else %}
-        <div class="empty empty-inline">
-          <p>Nothing collected yet. The demand brief is written from these items, so it can only be as good as what you paste here.</p>
+          <p class="meta">Each source link was returned by the search itself. A finding whose link could not be confirmed is shown but kept out of the brief.</p>
         </div>
-      {% endif %}
-
-      {% if can_run_stage1 and raw_items %}
-        <form method="post" action="{% url 'run_stage1' cycle.pk %}" data-working="Reading {{ raw_items|length }} item{{ raw_items|length|pluralize }} and writing the demand brief">
-          {% csrf_token %}
-          <button class="btn btn-primary" type="submit">Write demand brief</button>
-        </form>
       {% endif %}
 
       {% if signals %}
         <div class="evidence">
+          <h3>What your audience said</h3>
           <div class="tally">
             <button type="button" class="tally-cell is-active" data-filter="all"><strong>{{ signals|length }}</strong> signals</button>
             <button type="button" class="tally-cell tally-purchase" data-filter="purchase"><strong>{{ intent_counts.purchase }}</strong> asked to buy</button>
@@ -129,7 +154,7 @@
       {% if brief %}
         <article class="brief">
           <header class="brief-head">
-            <h3>Demand brief</h3>
+            <h3>Research brief</h3>
             <p class="stamp stamp-{{ brief.status }}">{{ brief.get_status_display }}{% if brief.decided_at %}, {{ brief.decided_at|date:"j M Y" }}{% endif %}</p>
           </header>
           <div class="brief-text">{{ brief.text|linebreaks }}</div>
@@ -142,12 +167,12 @@
           <form class="gate" method="post" action="{% url 'decide_brief' cycle.pk %}">
             {% csrf_token %}
             <h3>Gate 1: your decision</h3>
-            <p>Approve only if this matches what you see in your messages. Stage 2 designs directly from it.</p>
+            <p>Approve if this is a sound basis for new designs. Stage 2 designs directly from it.</p>
             <label for="brief-notes">Notes for the designer step, or the reason for rejecting</label>
-            <textarea id="brief-notes" name="notes" rows="3" placeholder="For example: focus on the hats and gloves; ignore the bag requests."></textarea>
+            <textarea id="brief-notes" name="notes" rows="3" placeholder="For example: lean into the accessories; skip anything in synthetic yarn."></textarea>
             <div class="gate-actions">
-              <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve demand brief</button>
-              <button class="btn btn-danger" type="submit" name="decision" value="reject">Reject demand brief</button>
+              <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve research brief</button>
+              <button class="btn btn-danger" type="submit" name="decision" value="reject">Reject research brief</button>
             </div>
           </form>
         {% endif %}
@@ -158,15 +183,15 @@
     <section class="stage {% if cycle.stage_number < 2 %}stage-locked{% endif %}" id="stage-2" aria-labelledby="stage-2-title">
       <h2 id="stage-2-title">Collection concepts</h2>
       {% if cycle.stage_number < 2 %}
-        <p class="stage-intro">Unlocks when you approve a demand brief.</p>
+        <p class="stage-intro">Unlocks when you approve a research brief.</p>
       {% else %}
-        <p class="stage-intro">Three different directions designed from the approved brief. Each one is then checked by a separate reviewer that did not write it.</p>
+        <p class="stage-intro">Three new collections designed from the approved brief. Each one is then checked by a separate reviewer that did not write it.</p>
       {% endif %}
 
       {% if can_run_stage2 %}
-        <form method="post" action="{% url 'run_stage2' cycle.pk %}" data-working="Designing three collection concepts and reviewing each one">
+        <form method="post" action="{% url 'run_stage2' cycle.pk %}" data-working="Designing three new collections and reviewing each one">
           {% csrf_token %}
-          <button class="btn btn-primary" type="submit">Design three concepts</button>
+          <button class="btn btn-primary" type="submit">Design three new collections</button>
         </form>
       {% endif %}
 
@@ -220,6 +245,7 @@
                         <div><dt>Signature detail</dt><dd>{{ card.data.signature_detail }}</dd></div>
                         <div><dt>For</dt><dd>{{ card.data.target_customer }}</dd></div>
                         <div><dt>Evidence</dt><dd>{{ card.data.why_now }}</dd></div>
+                        <div><dt>Rests on</dt><dd>{{ card.data.basis }}</dd></div>
                         <div><dt>Pieces and price</dt><dd>{{ card.piece_count }} pieces{% if card.price_range %}, €{{ card.price_range.0|floatformat:0 }} to €{{ card.price_range.1|floatformat:0 }}{% endif %}</dd></div>
                       </dl>
                     </div>
@@ -363,7 +389,7 @@
         {% if model_calls %}
           <div class="table-wrap">
             <table class="calls">
-              <thead><tr><th>Step</th><th>Model</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Cost</th><th>Result</th><th>When</th></tr></thead>
+              <thead><tr><th>Step</th><th>Model</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Searches</th><th class="num">Cost</th><th>Result</th><th>When</th></tr></thead>
               <tbody>
                 {% for call in model_calls %}
                   <tr>
@@ -371,6 +397,7 @@
                     <td>{{ call.model }}{% if call.dry_run %} <span class="meta">sample</span>{% endif %}</td>
                     <td class="num">{{ call.input_tokens }}</td>
                     <td class="num">{{ call.output_tokens }}</td>
+                    <td class="num">{{ call.web_searches }}</td>
                     <td class="num">${{ call.cost_usd }}</td>
                     <td>{% if call.ok %}OK{% else %}<span class="failed" title="{{ call.error }}">Failed</span>{% endif %}</td>
                     <td>{{ call.created_at|date:"j M, H:i" }}</td>

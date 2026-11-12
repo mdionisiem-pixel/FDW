@@ -2,14 +2,15 @@
 import copy
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from . import dryrun, prompts, schemas, stages
-from .llm import DryRunClient, LLMResult, SpendLimitError, StageError, cost_of, parse_json
-from .models import Approval, Concept, Cycle, DemandBrief, ModelCall, Piece, RawItem, Signal
+from .llm import AnthropicClient, DryRunClient, LLMResult, SpendLimitError, StageError, cost_of, parse_json
+from .models import Approval, Concept, Cycle, DemandBrief, ModelCall, Piece, RawItem, Signal, TrendFinding
 
 
 class ScriptedClient:
@@ -17,15 +18,21 @@ class ScriptedClient:
 
     dry_run = False
 
-    def __init__(self, script=None, tokens=(1000, 500)):
+    def __init__(self, script=None, tokens=(1000, 500), source_urls=None, searches=3):
         self.script = {k: list(v) for k, v in (script or {}).items()}
         self.tokens = tokens
+        self.source_urls = dryrun.sample_source_urls() if source_urls is None else source_urls
+        self.searches = searches
         self.calls = []
+        self.search_calls = 0
 
-    def complete(self, step, prompt, model, max_tokens):
+    def complete(self, step, prompt, model, max_tokens, web_search_max=0):
         self.calls.append(step)
         queue = self.script.get(step)
         text = queue.pop(0) if queue else dryrun.respond(step, prompt)
+        if web_search_max > 0:
+            self.search_calls += 1
+            return LLMResult(text, *self.tokens, web_searches=self.searches, source_urls=list(self.source_urls))
         return LLMResult(text, *self.tokens)
 
 
@@ -109,10 +116,14 @@ class SchemaTests(TestCase):
 
 
 class Stage1Tests(TestCase):
-    def test_stage1_needs_items(self):
-        cycle = Cycle.objects.create(name="Empty")
-        with self.assertRaises(StageError):
-            stages.run_stage1(cycle, client=DryRunClient())
+    def test_stage1_runs_with_nothing_typed(self):
+        cycle = Cycle.objects.create(name="Research only")
+        brief = stages.run_stage1(cycle, client=DryRunClient())
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.status, Cycle.Status.BRIEF_PENDING)
+        self.assertEqual(brief.status, DemandBrief.Status.PENDING)
+        self.assertEqual(cycle.findings.filter(verified=True).count(), 4)
+        self.assertEqual(cycle.signals.count(), 0)
 
     def test_stage1_writes_signals_and_pending_brief(self):
         cycle = make_cycle()
@@ -164,6 +175,157 @@ class Stage1Tests(TestCase):
         stages.decide_brief(brief, "approve")
         with self.assertRaises(stages.GateError):
             stages.decide_brief(brief, "reject", "Changed my mind")
+
+
+class ResearchTests(TestCase):
+    def _findings(self, extra_url):
+        data = json.loads(dryrun.respond("research_trends", ""))
+        data["findings"].append({
+            "theme": "Invented theme", "what_people_want": "Something nobody reported.",
+            "evidence": "No real source.", "source_title": "Made up", "source_url": extra_url,
+            "source_date": None, "relevance": "",
+        })
+        return json.dumps(data)
+
+    def test_finding_with_unconfirmed_source_is_flagged_and_kept_out_of_the_brief(self):
+        cycle = Cycle.objects.create(name="Check sources")
+        fake_url = "https://not-in-results.example.org/report"
+        client = ScriptedClient({"research_trends": [self._findings(fake_url)]})
+        stages.run_stage1(cycle, client=client)
+        self.assertEqual(cycle.findings.filter(verified=True).count(), 4)
+        dropped = cycle.findings.get(verified=False)
+        self.assertEqual(dropped.source_url, fake_url)
+        brief_call = ModelCall.objects.get(cycle=cycle, step="demand_brief")
+        self.assertNotIn(fake_url, brief_call.prompt)
+        self.assertNotIn("Invented theme", brief_call.prompt)
+
+    def test_no_confirmed_findings_and_no_other_input_stops_the_stage(self):
+        cycle = Cycle.objects.create(name="Nothing confirmed")
+        client = ScriptedClient(source_urls=[])
+        with self.assertRaises(StageError):
+            stages.run_stage1(cycle, client=client)
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.status, Cycle.Status.NEW)
+        self.assertEqual(TrendFinding.objects.count(), 0)
+
+    def test_direction_alone_is_enough_and_reaches_the_prompts(self):
+        cycle = Cycle.objects.create(name="Direction", direction="Bold winter accessories")
+        client = ScriptedClient(source_urls=[])
+        brief = stages.run_stage1(cycle, client=client)
+        research_call = ModelCall.objects.get(cycle=cycle, step="research_trends")
+        self.assertIn("Bold winter accessories", research_call.prompt)
+        stages.decide_brief(brief, "approve")
+        cycle.refresh_from_db()
+        stages.run_stage2(cycle, client=ScriptedClient())
+        generator_call = ModelCall.objects.get(cycle=cycle, step="generate_concepts")
+        self.assertIn("Bold winter accessories", generator_call.prompt)
+
+    def test_search_cost_is_recorded(self):
+        cycle = Cycle.objects.create(name="Cost")
+        stages.run_stage1(cycle, client=ScriptedClient(tokens=(1000, 500), searches=3))
+        call = ModelCall.objects.get(cycle=cycle, step="research_trends")
+        self.assertEqual(call.web_searches, 3)
+        # 1,000 input at $2/M + 500 output at $10/M + 3 searches at $0.01
+        self.assertEqual(call.cost_usd, Decimal("0.0370"))
+
+    def test_malformed_research_is_reformatted_without_searching_again(self):
+        cycle = Cycle.objects.create(name="Reformat")
+        good = dryrun.respond("research_trends", "")
+        client = ScriptedClient({"research_trends": ["Here are my findings: " + good[:-1]]})
+        with self.assertRaises(StageError):
+            # The truncated JSON cannot be repaired by the sample reformatter, so the stage stops.
+            stages.run_stage1(cycle, client=client)
+        self.assertEqual(client.search_calls, 1)
+        self.assertEqual(client.calls, ["research_trends", "reformat_findings"])
+
+        cycle2 = Cycle.objects.create(name="Reformat ok")
+        client2 = ScriptedClient({"research_trends": ["not json"], "reformat_findings": [good]})
+        stages.run_stage1(cycle2, client=client2)
+        self.assertEqual(client2.search_calls, 1)
+        self.assertEqual(cycle2.findings.filter(verified=True).count(), 4)
+
+    def test_urls_are_compared_without_scheme_or_trailing_slash(self):
+        self.assertEqual(
+            schemas.normalise_url("https://www.Example.com/Report/"),
+            schemas.normalise_url("http://example.com/Report"),
+        )
+        self.assertNotEqual(
+            schemas.normalise_url("https://example.com/a"), schemas.normalise_url("https://example.com/b")
+        )
+
+
+class AnthropicClientTests(TestCase):
+    """The SDK is replaced with a fake, so these check our handling, not the API."""
+
+    def _message(self, blocks, stop_reason, searches=0):
+        usage = SimpleNamespace(
+            input_tokens=100, output_tokens=50,
+            server_tool_use=SimpleNamespace(web_search_requests=searches),
+        )
+        return SimpleNamespace(content=blocks, stop_reason=stop_reason, usage=usage)
+
+    def _client(self, responses):
+        test = self
+        calls = []
+
+        class FakeStream:
+            def __init__(self, message):
+                self.message = message
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def get_final_message(self):
+                return self.message
+
+        class FakeMessages:
+            def stream(self, **kwargs):
+                calls.append(kwargs)
+                return FakeStream(responses.pop(0))
+
+        client = AnthropicClient.__new__(AnthropicClient)
+        client._anthropic = SimpleNamespace(APIError=RuntimeError)
+        client._client = SimpleNamespace(messages=FakeMessages())
+        return client, calls
+
+    def test_paused_search_turn_is_continued_and_results_are_combined(self):
+        result_block = SimpleNamespace(
+            type="web_search_tool_result",
+            content=[SimpleNamespace(url="https://example.com/a"), SimpleNamespace(url="https://example.com/b")],
+        )
+        first = self._message([SimpleNamespace(type="text", text="Searching. "), result_block], "pause_turn", 2)
+        second = self._message([SimpleNamespace(type="text", text='{"findings": []}')], "end_turn", 1)
+        client, calls = self._client([first, second])
+        result = client.complete("research_trends", "prompt", "claude-sonnet-5-5", 1000, web_search_max=5)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["tools"][0]["max_uses"], 5)
+        self.assertEqual(calls[1]["messages"][-1]["role"], "assistant")
+        self.assertEqual(result.web_searches, 3)
+        self.assertEqual(result.source_urls, ["https://example.com/a", "https://example.com/b"])
+        self.assertEqual(result.input_tokens, 200)
+        self.assertTrue(result.text.endswith('{"findings": []}'))
+
+    def test_no_tools_are_sent_without_web_search(self):
+        client, calls = self._client([self._message([SimpleNamespace(type="text", text="ok")], "end_turn")])
+        client.complete("demand_brief", "prompt", "claude-sonnet-5-5", 1000)
+        self.assertNotIn("tools", calls[0])
+
+    def test_search_error_result_is_ignored_safely(self):
+        error_block = SimpleNamespace(
+            type="web_search_tool_result",
+            content=SimpleNamespace(type="web_search_tool_result_error", error_code="unavailable"),
+        )
+        client, _ = self._client([self._message([error_block, SimpleNamespace(type="text", text="{}")], "end_turn")])
+        result = client.complete("research_trends", "prompt", "claude-sonnet-5-5", 1000, web_search_max=5)
+        self.assertEqual(result.source_urls, [])
+
+    def test_cut_off_answer_raises(self):
+        client, _ = self._client([self._message([SimpleNamespace(type="text", text="{")], "max_tokens")])
+        with self.assertRaises(StageError):
+            client.complete("generate_concepts", "prompt", "claude-sonnet-5-5", 10)
 
 
 class Stage2Tests(TestCase):
@@ -326,6 +488,25 @@ class ScreenTests(TestCase):
         stages.run_stage1(cycle, client=DryRunClient())
         self.client.post(reverse("add_items", args=[cycle.pk]), {"source": "dm", "items": "late message"})
         self.assertEqual(cycle.raw_items.count(), 2)
+
+    def test_flow_starts_with_nothing_typed(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="No input")
+        self.client.post(reverse("run_stage1", args=[cycle.pk]))
+        page = self.client.get(reverse("cycle_detail", args=[cycle.pk]))
+        self.assertContains(page, "What the research found")
+        self.assertContains(page, "Gate 1: your decision")
+
+    def test_direction_is_saved_then_locked(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="Direction")
+        self.client.post(reverse("save_direction", args=[cycle.pk]), {"direction": "Hats and gloves"})
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.direction, "Hats and gloves")
+        stages.run_stage1(cycle, client=DryRunClient())
+        self.client.post(reverse("save_direction", args=[cycle.pk]), {"direction": "Changed"})
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.direction, "Hats and gloves")
 
     def test_stage_endpoints_reject_get(self):
         self.client.force_login(self.user)

@@ -138,3 +138,11 @@ FDW_CYCLE_LIMIT_USD = Decimal(os.environ.get("FDW_CYCLE_LIMIT_USD", "5"))
 
 # How many raw messages are sent to the extractor in one call.
 FDW_EXTRACT_BATCH_SIZE = int(os.environ.get("FDW_EXTRACT_BATCH_SIZE", "40"))
+
+# Stage 1 market research uses the model's web search tool.
+# Price per search in US dollars. Source: Claude web search tool docs
+# ($10 per 1,000 searches), read 12 November 2026.
+FDW_SEARCH_PRICE_USD = Decimal(os.environ.get("FDW_SEARCH_PRICE_USD", "0.01"))
+# Hard cap on searches in one research run.
+FDW_RESEARCH_MAX_SEARCHES = int(os.environ.get("FDW_RESEARCH_MAX_SEARCHES", "8"))
+FDW_WEB_SEARCH_TOOL = os.environ.get("FDW_WEB_SEARCH_TOOL", "web_search_20250305")

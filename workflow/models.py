@@ -57,19 +57,23 @@ class BrandBrief(models.Model):
 
 
 class Cycle(models.Model):
-    """One pass from demand signals to a chosen collection."""
+    """One pass from market research to a chosen collection."""
 
     class Status(models.TextChoices):
-        NEW = "new", "Collecting signals"
-        BRIEF_PENDING = "brief_pending", "Demand brief awaiting approval"
-        BRIEF_APPROVED = "brief_approved", "Demand brief approved"
-        BRIEF_REJECTED = "brief_rejected", "Demand brief rejected"
+        NEW = "new", "Ready for market research"
+        BRIEF_PENDING = "brief_pending", "Research brief awaiting approval"
+        BRIEF_APPROVED = "brief_approved", "Research brief approved"
+        BRIEF_REJECTED = "brief_rejected", "Research brief rejected"
         CONCEPTS_PENDING = "concepts_pending", "Concepts awaiting selection"
         CONCEPTS_SELECTED = "concepts_selected", "Collection selected"
 
     name = models.CharField(max_length=120)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.NEW)
     language = models.CharField(max_length=40, default="English")
+    direction = models.TextField(
+        blank=True,
+        help_text="Optional. The founder's own direction or ideas for this collection.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -142,6 +146,27 @@ class Signal(models.Model):
 
     def __str__(self):
         return f"{self.intent}: {self.product_type or 'unspecified'}"
+
+
+class TrendFinding(models.Model):
+    """One finding from web research, tied to the page it came from."""
+
+    cycle = models.ForeignKey(Cycle, on_delete=models.CASCADE, related_name="findings")
+    theme = models.CharField(max_length=200)
+    what_people_want = models.TextField()
+    evidence = models.TextField()
+    source_title = models.CharField(max_length=300, blank=True)
+    source_url = models.URLField(max_length=1000)
+    source_date = models.CharField(max_length=20, blank=True)
+    relevance = models.TextField(blank=True)
+    # True only when the URL was among the search results the model received.
+    verified = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-verified", "id"]
+
+    def __str__(self):
+        return self.theme
 
 
 class DemandBrief(models.Model):
@@ -262,6 +287,7 @@ class ModelCall(models.Model):
     model = models.CharField(max_length=60)
     input_tokens = models.PositiveIntegerField(default=0)
     output_tokens = models.PositiveIntegerField(default=0)
+    web_searches = models.PositiveIntegerField(default=0)
     cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     prompt = models.TextField()
     response = models.TextField(blank=True)
