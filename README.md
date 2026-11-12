@@ -7,7 +7,7 @@ This is **slice 1** of the specification. It covers the first two of seven stage
 
 | Stage | Status | What it does |
 | --- | --- | --- |
-| 1. Market research | Built | Searches the web for current demand, checks every source, and writes a research brief. It compares the target season across the last two to three years with what is rising now. Nothing needs to be typed; a target season, a direction and audience messages are optional |
+| 1. Market research | Built | Researches the whole fashion market, compares the target season across earlier years with what is rising now, and builds a strategic report: headline and takeaways, an opportunity matrix, a timeline of each theme, reported growth figures, published forecasts, a category view, and recommendations. Nothing needs to be typed |
 | 2. Collection concepts | Built | Plans three new collections in one call, then specifies each in its own call so no answer is cut off; reviews each one separately; you pick one or two |
 | 3. Sourcing check | Not built | Slice 2 |
 | 4. Visual prototypes | Not built | Slice 2 |
@@ -69,6 +69,9 @@ the "Model calls" record on the cycle page.
 
 These are enforced in code, not by prompts.
 
+- **Figures.** A number reaches a chart only if the same number appears in the source's
+  evidence text. Opportunity scores, timeline levels and the outlook are labelled on screen
+  as the researcher's assessment.
 - **Sources.** A research finding reaches the brief only if its link is one the web
   search actually returned in that run. This is checked in code. Findings that fail
   are shown as left out.

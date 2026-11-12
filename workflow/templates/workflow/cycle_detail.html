@@ -38,7 +38,7 @@
     <!-- Stage 1 -->
     <section class="stage" id="stage-1" aria-labelledby="stage-1-title">
       <h2 id="stage-1-title">Market research</h2>
-      <p class="stage-intro">The app searches the web for what people are looking for and buying now, then writes a brief with its sources. You do not need to type anything. A direction of your own is optional.</p>
+      <p class="stage-intro">The app researches the whole fashion market, compares this season with earlier years, and builds a strategic report with sources, figures and forecasts. You do not need to type anything. A direction of your own is optional.</p>
 
       {% if can_edit_items %}
         <form class="direction" method="post" action="{% url 'save_direction' cycle.pk %}">
@@ -66,7 +66,7 @@
             <p class="meta">The research checks your direction first, then looks beyond it. At least one concept will develop it.</p>
             <button class="btn" type="submit">Save research inputs</button>
           </div>
-          <button class="btn btn-primary" type="submit" formaction="{% url 'run_stage1' cycle.pk %}" data-working="Researching the market and writing the brief">Research the market</button>
+          <button class="btn btn-primary" type="submit" formaction="{% url 'run_stage1' cycle.pk %}" data-working="Researching the market and building the report. This takes a few minutes.">Research the market</button>
         </form>
 
         <details class="fold fold-optional">
@@ -109,84 +109,219 @@
       {% endif %}
 
       {% if brief %}
-        <article class="brief">
-          <header class="brief-head">
+        <article class="report">
+          <header class="report-head">
             <div>
-              <h3>Research brief</h3>
-              {% if bv %}<p class="meta">{{ bv.season }}</p>{% endif %}
+              <p class="report-kicker">Market report{% if bv %}, {{ bv.season }}{% endif %}</p>
+              {% if bv %}<h3 class="report-headline">{{ bv.headline }}</h3>{% else %}<h3>Research brief</h3>{% endif %}
             </div>
             <p class="stamp stamp-{{ brief.status }}">{{ brief.get_status_display }}{% if brief.decided_at %}, {{ brief.decided_at|date:"j M Y" }}{% endif %}</p>
           </header>
 
           {% if bv %}
-            <p class="brief-summary">{{ bv.summary }}</p>
-
-            <h4 class="brief-label">Demand themes, strongest first</h4>
-            <ol class="themes">
-              {% for t in bv.themes %}
-                <li class="theme strength-{{ t.strength }}">
-                  <div class="theme-rating">
-                    <span class="stitches meter" role="img" aria-label="Evidence: {{ t.strength }}">
-                      {% for i in "123" %}<span class="stitch {% if forloop.counter <= t.level %}on{% endif %}"></span>{% endfor %}
-                    </span>
-                    <span class="theme-strength">{{ t.strength_label }}</span>
-                  </div>
-                  <div class="theme-body">
-                    <h5>{{ t.name }}</h5>
-                    <p>{{ t.what_people_want }}</p>
-                    <p class="meta">{{ t.strength_reason }}</p>
-                    <p class="theme-tags">
-                      {% if t.timeframe_label %}<span class="chip chip-time-{{ t.timeframe }}">{{ t.timeframe_label }}</span>{% endif %}
-                      {% for b in t.basis_labels %}<span class="chip">{{ b }}</span>{% endfor %}
-                      {% if t.audience_signals %}<span class="chip">{{ t.audience_signals }}</span>{% endif %}
-                    </p>
-                    {% if t.sources %}
-                      <p class="theme-sources">Sources: {% for s in t.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.title }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
-                    {% endif %}
-                  </div>
-                </li>
+            <ol class="takeaways">
+              {% for t in bv.takeaways %}
+                <li><p class="takeaway-head">{{ t.headline }}</p><p class="takeaway-so">{{ t.so_what }}</p></li>
               {% endfor %}
             </ol>
 
-            <h4 class="brief-label">Season view</h4>
-            <div class="season-view">
-              <section class="season-col season-returns">
-                <h5>Returns every year</h5>
-                {% if bv.season_view.returns_every_year %}<ul>{% for item in bv.season_view.returns_every_year %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}
+            <dl class="kpis">
+              {% for k in bv.kpis %}<div class="kpi"><dt>{{ k.label|capfirst }}</dt><dd>{{ k.value }}</dd></div>{% endfor %}
+            </dl>
+
+            <section class="panel" aria-labelledby="matrix-heading">
+              <h4 id="matrix-heading" class="panel-title">Where to play</h4>
+              <p class="panel-sub">Each theme placed by how attractive the market is and how readily Malina can make it. Scores are the researcher's assessment from the sources, not measurements.</p>
+              <div class="matrix-wrap">
+                <div class="matrix-box">{{ bv.matrix }}</div>
+                <div class="matrix-side">
+                  <ul class="momentum-key">
+                    <li><span class="mx-key mx-rising"></span>Rising</li>
+                    <li><span class="mx-key mx-stable"></span>Stable</li>
+                    <li><span class="mx-key mx-fading"></span>Fading</li>
+                  </ul>
+                  <ol class="theme-index">
+                    {% for t in bv.themes %}<li><span class="mx-key mx-{{ t.momentum }}">{{ t.number }}</span><span>{{ t.name }} <span class="meta">{{ t.category_label }}</span></span></li>{% endfor %}
+                  </ol>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel" aria-labelledby="themes-heading">
+              <h4 id="themes-heading" class="panel-title">Demand themes</h4>
+              <ol class="themes">
+                {% for t in bv.themes %}
+                  <li class="theme strength-{{ t.strength }}">
+                    <div class="theme-rating">
+                      <span class="theme-number">{{ t.number }}</span>
+                      <span class="stitches meter" role="img" aria-label="Evidence: {{ t.strength }}">
+                        {% for i in "123" %}<span class="stitch {% if forloop.counter <= t.level %}on{% endif %}"></span>{% endfor %}
+                      </span>
+                      <span class="theme-strength">{{ t.strength_label }} evidence</span>
+                    </div>
+                    <div class="theme-body">
+                      <h5>{{ t.name }}</h5>
+                      <p>{{ t.what_people_want }}</p>
+                      <dl class="theme-scores">
+                        <div><dt>Market</dt><dd><span class="dots" aria-label="{{ t.attractiveness }} out of 5">{% for i in "12345" %}<span class="dot-s {% if forloop.counter <= t.attractiveness %}on{% endif %}"></span>{% endfor %}</span></dd></div>
+                        <div><dt>Fit</dt><dd><span class="dots" aria-label="{{ t.fit }} out of 5">{% for i in "12345" %}<span class="dot-s {% if forloop.counter <= t.fit %}on{% endif %}"></span>{% endfor %}</span></dd></div>
+                      </dl>
+                      <p class="meta">{{ t.strength_reason }} {{ t.fit_note }}</p>
+                      <p class="theme-tags">
+                        <span class="chip chip-cat">{{ t.category_label }}</span>
+                        <span class="chip chip-mom-{{ t.momentum }}">{{ t.momentum_label }}</span>
+                        {% if t.timeframe_label %}<span class="chip chip-time-{{ t.timeframe }}">{{ t.timeframe_label }}</span>{% endif %}
+                        {% for b in t.basis_labels %}<span class="chip">{{ b }}</span>{% endfor %}
+                        {% if t.audience_signals %}<span class="chip">{{ t.audience_signals }}</span>{% endif %}
+                      </p>
+                      {% if t.sources %}
+                        <p class="theme-sources">Sources: {% for s in t.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.title }}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+                      {% endif %}
+                    </div>
+                  </li>
+                {% endfor %}
+              </ol>
+            </section>
+
+            {% if bv.periods %}
+              <section class="panel" aria-labelledby="timeline-heading">
+                <h4 id="timeline-heading" class="panel-title">How demand has moved</h4>
+                <p class="panel-sub">Each theme across earlier seasons, now, and the outlook for the target season. The outlook column is an assessment, based on published forecasts where they exist.</p>
+                <div class="table-wrap">
+                  <table class="heat">
+                    <thead><tr><th scope="col">Theme</th>{% for p in bv.periods %}<th scope="col">{{ p }}</th>{% endfor %}<th scope="col" class="heat-outlook-head">Outlook</th></tr></thead>
+                    <tbody>
+                      {% for row in bv.timeline %}
+                        <tr>
+                          <th scope="row"><span class="theme-number">{{ row.number }}</span> {{ row.name }}</th>
+                          {% for c in row.cells %}<td class="lvl lvl-{{ c.level }}">{{ c.label }}</td>{% endfor %}
+                          <td class="lvl lvl-{{ row.outlook.level }} heat-outlook" title="{{ row.outlook.reason }}">{{ row.outlook.label }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                <ul class="heat-key">
+                  <li><span class="lvl lvl-emerging"></span>Emerging</li>
+                  <li><span class="lvl lvl-established"></span>Established</li>
+                  <li><span class="lvl lvl-peak"></span>Peak</li>
+                  <li><span class="lvl lvl-declining"></span>Declining</li>
+                  <li><span class="lvl lvl-absent"></span>Absent</li>
+                  <li><span class="lvl lvl-unknown"></span>No data</li>
+                </ul>
               </section>
-              <section class="season-col season-new">
-                <h5>New this year</h5>
-                {% if bv.season_view.new_this_year %}<ul>{% for item in bv.season_view.new_this_year %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}
+            {% endif %}
+
+            {% if bv.market_shifts %}
+              <section class="panel" aria-labelledby="shifts-heading">
+                <h4 id="shifts-heading" class="panel-title">Market shifts</h4>
+                <ul class="shifts">
+                  {% for m in bv.market_shifts %}
+                    <li><p class="shift-from"><span class="meta">Then</span>{{ m.from }}</p><span class="shift-arrow" aria-hidden="true"></span><p class="shift-to"><span class="meta">Now</span>{{ m.to }}</p><p class="meta shift-ev">{{ m.evidence }}</p></li>
+                  {% endfor %}
+                </ul>
               </section>
-              <section class="season-col season-fading">
-                <h5>Fading, avoid</h5>
-                {% if bv.season_view.fading %}<ul>{% for item in bv.season_view.fading %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}
+            {% endif %}
+
+            <div class="panel-pair">
+              <section class="panel" aria-labelledby="figures-heading">
+                <h4 id="figures-heading" class="panel-title">Reported growth</h4>
+                {% if bv.percent_figures %}
+                  <ul class="bars">
+                    {% for f in bv.percent_figures %}
+                      <li>
+                        <p class="bar-label">{{ f.label|capfirst }} <span class="meta">{{ f.theme }}{% if f.period %}, {{ f.period }}{% endif %}</span></p>
+                        <div class="bar-row"><span class="bar-track"><span class="bar {% if f.negative %}bar-neg{% endif %}" style="width: {{ f.width }}%"></span></span><span class="bar-value">{% if not f.negative %}+{% endif %}{{ f.value|floatformat:"-1" }}%</span></div>
+                        <a class="bar-src" href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title }}</a>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="meta">The sources found gave no percentage figures.</p>
+                {% endif %}
+                {% if bv.other_figures %}
+                  <table class="mini">
+                    <caption>Other reported figures</caption>
+                    <tbody>{% for f in bv.other_figures %}<tr><td>{{ f.label|capfirst }}{% if f.period %} <span class="meta">{{ f.period }}</span>{% endif %}</td><td class="num">{{ f.value|floatformat:"-2" }} {{ f.unit }}</td><td><a href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title }}</a></td></tr>{% endfor %}</tbody>
+                  </table>
+                {% endif %}
+                <p class="meta">Only figures quoted in a source's own text are shown.</p>
+              </section>
+
+              <section class="panel" aria-labelledby="forecasts-heading">
+                <h4 id="forecasts-heading" class="panel-title">Published forecasts</h4>
+                {% if bv.forecasts %}
+                  <ul class="forecasts">
+                    {% for f in bv.forecasts %}
+                      <li>
+                        {% if f.value is not None %}<p class="forecast-value">{{ f.value|floatformat:"-1" }}{% if f.unit == "%" %}%{% else %} {{ f.unit }}{% endif %}{% if f.horizon %} <span>by {{ f.horizon }}</span>{% endif %}</p>{% elif f.horizon %}<p class="forecast-value forecast-noval">{{ f.horizon }}</p>{% endif %}
+                        <p>{{ f.statement }}</p>
+                        <p class="meta">{{ f.theme }}, <a href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title }}</a></p>
+                      </li>
+                    {% endfor %}
+                  </ul>
+                {% else %}
+                  <p class="meta">No source found in this run published a forecast. The outlook column above is the researcher's assessment.</p>
+                {% endif %}
               </section>
             </div>
 
-            <div class="brief-pair">
-              <section>
-                <h4 class="brief-label">Your direction</h4>
+            {% if bv.category_mix %}
+              <section class="panel" aria-labelledby="mix-heading">
+                <h4 id="mix-heading" class="panel-title">Where the evidence points, by category</h4>
+                <p class="panel-sub">Research findings per category, split by how readily Malina could make them.</p>
+                <ul class="mix">
+                  {% for row in bv.category_mix %}
+                    <li><span class="mix-label">{{ row.label }}</span><span class="mix-track">{% for seg in row.segments %}<span class="mix-seg fit-{{ seg.fit }}" style="width: {{ seg.width }}%" title="{{ seg.label }}: {{ seg.count }}"></span>{% endfor %}</span><span class="mix-total">{{ row.total }}</span></li>
+                  {% endfor %}
+                </ul>
+                <ul class="heat-key">
+                  <li><span class="mix-seg fit-core"></span>Current range</li>
+                  <li><span class="mix-seg fit-adjacent"></span>With a partner</li>
+                  <li><span class="mix-seg fit-outside"></span>New category</li>
+                </ul>
+              </section>
+            {% endif %}
+
+            <section class="panel" aria-labelledby="season-heading">
+              <h4 id="season-heading" class="panel-title">Season view</h4>
+              <div class="season-view">
+                <section class="season-col season-returns"><h5>Returns every year</h5>{% if bv.season_view.returns_every_year %}<ul>{% for item in bv.season_view.returns_every_year %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}</section>
+                <section class="season-col season-new"><h5>New this year</h5>{% if bv.season_view.new_this_year %}<ul>{% for item in bv.season_view.new_this_year %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}</section>
+                <section class="season-col season-fading"><h5>Fading, avoid</h5>{% if bv.season_view.fading %}<ul>{% for item in bv.season_view.fading %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing found.</p>{% endif %}</section>
+              </div>
+            </section>
+
+            {% if bv.beyond %}
+              <section class="panel" aria-labelledby="beyond-heading">
+                <h4 id="beyond-heading" class="panel-title">Beyond Malina's current range</h4>
+                <p class="panel-sub">Demand the market shows outside today's techniques or categories.</p>
+                <ul class="beyond">
+                  {% for o in bv.beyond %}<li><h5>{{ o.opportunity }}</h5><p>{{ o.why }}</p><p class="meta"><strong>Route:</strong> {{ o.route }}</p></li>{% endfor %}
+                </ul>
+              </section>
+            {% endif %}
+
+            <section class="panel panel-ink" aria-labelledby="implications-heading">
+              <h4 id="implications-heading" class="panel-title">What to do</h4>
+              <ol class="implications">
+                {% for i in bv.implications %}<li><h5>{{ i.title }}</h5><p>{{ i.action }}</p></li>{% endfor %}
+              </ol>
+            </section>
+
+            <div class="panel-pair">
+              <section class="panel">
+                <h4 class="panel-title">Your direction</h4>
                 <p><span class="verdict verdict-{{ bv.direction.verdict }}">{{ bv.direction.label }}</span></p>
                 {% if bv.direction.explanation %}<p>{{ bv.direction.explanation }}</p>{% endif %}
-              </section>
-              <section>
-                <h4 class="brief-label">Earlier price tests</h4>
+                <h4 class="panel-title panel-title-gap">Earlier price tests</h4>
                 <p>{{ bv.past_tests }}</p>
               </section>
+              <section class="panel">
+                <h4 class="panel-title">What is still unknown</h4>
+                {% if bv.gaps %}<ul class="plain-list">{% for gap in bv.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>{% else %}<p class="meta">Nothing noted.</p>{% endif %}
+              </section>
             </div>
-
-            {% if bv.gaps %}
-              <h4 class="brief-label">What is still unknown</h4>
-              <ul class="plain-list">{% for gap in bv.gaps %}<li>{{ gap }}</li>{% endfor %}</ul>
-            {% endif %}
-
-            {% if bv.conflicts %}
-              <div class="issues issues-blocking">
-                <h4>Conflicts with the brand brief</h4>
-                <ul>{% for conflict in bv.conflicts %}<li>{{ conflict }}</li>{% endfor %}</ul>
-              </div>
-            {% endif %}
           {% else %}
             <div class="brief-text">{{ brief.text|linebreaks }}</div>
           {% endif %}
@@ -200,12 +335,12 @@
           <form class="gate" method="post" action="{% url 'decide_brief' cycle.pk %}">
             {% csrf_token %}
             <h3>Gate 1: your decision</h3>
-            <p>Approve if this is a sound basis for new designs. Stage 2 designs directly from it.</p>
+            <p>Approve if this report is a sound basis for new designs. Stage 2 designs directly from it.</p>
             <label for="brief-notes">Notes for the designer step, or the reason for rejecting</label>
             <textarea id="brief-notes" name="notes" rows="3" placeholder="For example: lean into the accessories; skip anything in synthetic yarn."></textarea>
             <div class="gate-actions">
-              <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve research brief</button>
-              <button class="btn btn-danger" type="submit" name="decision" value="reject">Reject research brief</button>
+              <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve market report</button>
+              <button class="btn btn-danger" type="submit" name="decision" value="reject">Reject market report</button>
             </div>
           </form>
         {% endif %}
@@ -213,7 +348,7 @@
 
       {% if finding_groups or dropped_findings %}
         <details class="fold fold-evidence" {% if not brief %}open{% endif %}>
-          <summary>Sources behind the brief <span class="chips">{% for group in finding_groups %}<span class="chip">{{ group.label }} {{ group.items|length }}</span>{% endfor %}{% if dropped_findings %}<span class="chip">Left out {{ dropped_findings|length }}</span>{% endif %}</span></summary>
+          <summary>Sources behind the report <span class="chips">{% for group in finding_groups %}<span class="chip">{{ group.label }} {{ group.items|length }}</span>{% endfor %}{% if dropped_findings %}<span class="chip">Left out {{ dropped_findings|length }}</span>{% endif %}</span></summary>
           {% for group in finding_groups %}
             <section class="finding-group">
               <h4 class="brief-label">{{ group.label }}</h4>
@@ -225,6 +360,7 @@
                       <a class="source" href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title|default:"Source" }}{% if f.source_date %}, {{ f.source_date }}{% endif %}</a>
                     </div>
                     <p>{{ f.what_people_want }}</p>
+                    <p class="theme-tags">{% if f.category %}<span class="chip chip-cat">{{ f.category|capfirst }}</span>{% endif %}{% if f.momentum %}<span class="chip chip-mom-{{ f.momentum }}">{{ f.momentum|capfirst }}</span>{% endif %}{% if f.malina_fit %}<span class="chip fit-chip-{{ f.malina_fit }}">{% if f.malina_fit == "core" %}Current range{% elif f.malina_fit == "adjacent" %}With a partner{% else %}New category{% endif %}</span>{% endif %}</p>
                     <dl class="finding-facts">
                       <div><dt>Evidence</dt><dd>{{ f.evidence }}</dd></div>
                       {% if f.seasons_observed %}<div><dt>Seen in</dt><dd>{{ f.seasons_observed }}</dd></div>{% endif %}

@@ -20,6 +20,10 @@ REVIEW_CRITERIA = (
 )
 REVIEW_OVERALL = {"recommend", "revise", "reject"}
 FINDING_TIMEFRAMES = {"recurring", "current", "both"}
+CATEGORIES = ("knitwear", "apparel", "outerwear", "accessories", "bags", "footwear", "jewellery", "other")
+MOMENTUM = {"rising", "stable", "fading"}
+FITS = ("core", "adjacent", "outside")
+HISTORY_LEVELS = ("absent", "emerging", "established", "peak", "declining", "unknown")
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 HANDMADE_WORDS = re.compile(r"\bhand[\s-]?made\b", re.IGNORECASE)
 
@@ -89,6 +93,65 @@ def normalise_url(url) -> str:
     return host.lower() + ("/" + rest if rest else "")
 
 
+def _number_forms(value) -> set:
+    """Ways a number can be written in a source: 40, 40.0, 40,5, 1,200, 1 200, 1200."""
+    number = abs(float(value))
+    forms = set()
+    if number == int(number):
+        whole = int(number)
+        forms.update({str(whole), f"{whole:,}", f"{whole:,}".replace(",", " "), f"{whole:,}".replace(",", ".")})
+    else:
+        text = f"{number:.10g}"
+        forms.update({text, text.replace(".", ",")})
+        rounded = f"{number:.1f}"
+        forms.update({rounded, rounded.replace(".", ",")})
+    return forms
+
+
+def number_in_text(value, text) -> bool:
+    """True when ``value`` is written in ``text`` as a whole number, not inside a longer one."""
+    import re as _re
+
+    haystack = str(text or "")
+    for form in _number_forms(value):
+        if _re.search(r"(?<![\d.,])" + _re.escape(form) + r"(?![\d]|[.,]\d)", haystack):
+            return True
+    return False
+
+
+def supported_figures(finding) -> list:
+    """Keep only the figures whose number appears in the finding's own evidence text.
+
+    This is how a chart is kept honest: a number the model added without
+    quoting it from the source never reaches the dashboard.
+    """
+    kept = []
+    for figure in finding.get("figures") or []:
+        if number_in_text(figure["value"], finding.get("evidence")):
+            kept.append({
+                "label": str(figure["label"])[:200],
+                "value": float(figure["value"]),
+                "unit": str(figure.get("unit") or "")[:20],
+                "period": str(figure.get("period") or "")[:60],
+            })
+    return kept
+
+
+def supported_forecast(finding):
+    """The finding's forecast, with its number removed unless the statement contains it."""
+    forecast = finding.get("forecast")
+    if not isinstance(forecast, dict) or not _is_text(forecast.get("statement")):
+        return None
+    value = forecast.get("value")
+    keep_value = _is_number(value) and number_in_text(value, forecast["statement"])
+    return {
+        "statement": str(forecast["statement"])[:500],
+        "horizon": str(forecast.get("horizon") or "")[:60],
+        "value": float(value) if keep_value else None,
+        "unit": str(forecast.get("unit") or "")[:20] if keep_value else "",
+    }
+
+
 def validate_findings(data):
     if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
         raise SchemaError(['Expected an object with a "findings" list.'])
@@ -106,6 +169,22 @@ def validate_findings(data):
             problems.append(f"{where}: source_url must be a full web address")
         if item.get("timeframe") not in FINDING_TIMEFRAMES:
             problems.append(f"{where}: timeframe must be one of {sorted(FINDING_TIMEFRAMES)}")
+        if item.get("category") not in CATEGORIES:
+            problems.append(f"{where}: category must be one of {list(CATEGORIES)}")
+        if item.get("momentum") not in MOMENTUM:
+            problems.append(f"{where}: momentum must be one of {sorted(MOMENTUM)}")
+        if item.get("malina_fit") not in FITS:
+            problems.append(f"{where}: malina_fit must be one of {list(FITS)}")
+        figures = item.get("figures", [])
+        if not isinstance(figures, list):
+            problems.append(f"{where}: figures must be a list")
+        else:
+            for figure in figures:
+                if not isinstance(figure, dict) or not _is_text(figure.get("label")) or not _is_number(figure.get("value")):
+                    problems.append(f"{where}: every figure needs a label and a numeric value")
+        forecast = item.get("forecast")
+        if forecast is not None and (not isinstance(forecast, dict) or not _is_text(forecast.get("statement"))):
+            problems.append(f"{where}: forecast must be null or an object with a statement")
     if problems:
         raise SchemaError(problems)
     return data
@@ -115,41 +194,77 @@ BRIEF_STRENGTHS = ("strong", "moderate", "weak", "untested")
 BRIEF_TIMEFRAMES = {"recurring", "current", "both", "not_applicable"}
 BRIEF_BASES = {"web_research", "audience_signals", "founder_direction"}
 DIRECTION_VERDICTS = {"supported", "mixed", "contradicted", "untested", "none_given"}
+OUTLOOK_LEVELS = ("emerging", "established", "peak", "declining", "unknown")
 
 
 def _string_list(value) -> bool:
     return isinstance(value, list) and all(isinstance(v, str) for v in value)
 
 
+def _score(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 5
+
+
+def _object_list(value, keys) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(item, dict) and all(_is_text(item.get(k)) for k in keys) for item in value
+    )
+
+
 def validate_brief(data, allowed_urls=None):
-    """Validate the structured research brief.
+    """Validate the strategic market report.
 
     ``allowed_urls`` is the set of normalised URLs of the verified findings.
-    A source in the brief must be one of them, so the brief cannot cite a page
-    that the research did not actually return.
+    A source in the report must be one of them, so it cannot cite a page that
+    the research did not actually return.
     """
     if not isinstance(data, dict):
-        raise SchemaError(["Expected a JSON object for the brief."])
+        raise SchemaError(["Expected a JSON object for the report."])
     problems = []
-    for field in ("season", "summary", "past_tests"):
+    for field in ("season", "headline", "past_tests"):
         if not _is_text(data.get(field)):
             problems.append(f"{field} is missing or empty")
+    takeaways = data.get("key_takeaways")
+    if not _object_list(takeaways, ("headline", "so_what")) or not 2 <= len(takeaways) <= 4:
+        problems.append("key_takeaways must be two to four items, each with a headline and a so_what")
+    periods = data.get("timeline_periods")
+    if not _string_list(periods) or not 2 <= len(periods) <= 5 or not all(p.strip() for p in periods):
+        problems.append("timeline_periods must be two to five non-empty labels")
+        periods = None
     themes = data.get("themes")
-    if not isinstance(themes, list) or not 1 <= len(themes) <= 5:
-        problems.append("themes must be a list of one to five themes")
+    if not isinstance(themes, list) or not 1 <= len(themes) <= 6:
+        problems.append("themes must be a list of one to six themes")
         themes = []
     for i, theme in enumerate(themes):
         where = f"theme {i + 1}"
         if not isinstance(theme, dict):
             problems.append(f"{where}: must be an object")
             continue
-        for field in ("name", "what_people_want", "strength_reason"):
+        for field in ("name", "what_people_want", "strength_reason", "fit_note"):
             if not _is_text(theme.get(field)):
                 problems.append(f"{where}: {field} is missing or empty")
+        if theme.get("category") not in CATEGORIES:
+            problems.append(f"{where}: category must be one of {list(CATEGORIES)}")
         if theme.get("strength") not in BRIEF_STRENGTHS:
             problems.append(f"{where}: strength must be one of {list(BRIEF_STRENGTHS)}")
         if theme.get("timeframe") not in BRIEF_TIMEFRAMES:
             problems.append(f"{where}: timeframe must be one of {sorted(BRIEF_TIMEFRAMES)}")
+        if theme.get("momentum") not in MOMENTUM:
+            problems.append(f"{where}: momentum must be one of {sorted(MOMENTUM)}")
+        for score in ("attractiveness", "fit"):
+            if not _score(theme.get(score)):
+                problems.append(f"{where}: {score} must be a whole number from 1 to 5")
+        history = theme.get("history")
+        if not isinstance(history, list) or not all(isinstance(h, dict) for h in history):
+            problems.append(f"{where}: history must be a list")
+        else:
+            if periods is not None and [h.get("period") for h in history] != periods:
+                problems.append(f"{where}: history must have one entry per timeline period, in the same order: {periods}")
+            if any(h.get("level") not in HISTORY_LEVELS for h in history):
+                problems.append(f"{where}: each history level must be one of {list(HISTORY_LEVELS)}")
+        outlook = theme.get("outlook")
+        if not isinstance(outlook, dict) or outlook.get("level") not in OUTLOOK_LEVELS or not _is_text(outlook.get("reason")):
+            problems.append(f"{where}: outlook needs a level from {list(OUTLOOK_LEVELS)} and a reason")
         basis = theme.get("basis")
         if not isinstance(basis, list) or not basis or not set(basis) <= BRIEF_BASES:
             problems.append(f"{where}: basis must list one or more of {sorted(BRIEF_BASES)}")
@@ -168,6 +283,8 @@ def validate_brief(data, allowed_urls=None):
                 )
         if "web_research" in basis and not sources:
             problems.append(f"{where}: a theme resting on web research must list its sources")
+    if not _object_list(data.get("market_shifts"), ("from", "to", "evidence")):
+        problems.append("market_shifts must be a list of items with from, to and evidence")
     season_view = data.get("season_view")
     if not isinstance(season_view, dict):
         problems.append("season_view must be an object")
@@ -175,12 +292,16 @@ def validate_brief(data, allowed_urls=None):
         for key in ("returns_every_year", "new_this_year", "fading"):
             if not _string_list(season_view.get(key)):
                 problems.append(f"season_view.{key} must be a list of short strings")
+    if not _object_list(data.get("beyond_current_range"), ("opportunity", "why", "route")):
+        problems.append("beyond_current_range must be a list of items with opportunity, why and route")
+    implications = data.get("implications")
+    if not _object_list(implications, ("title", "action")) or not 1 <= len(implications) <= 6:
+        problems.append("implications must be one to six items, each with a title and an action")
     direction = data.get("direction")
     if not isinstance(direction, dict) or direction.get("verdict") not in DIRECTION_VERDICTS:
         problems.append(f"direction.verdict must be one of {sorted(DIRECTION_VERDICTS)}")
-    for key in ("gaps", "conflicts"):
-        if not _string_list(data.get(key)):
-            problems.append(f"{key} must be a list of strings")
+    if not _string_list(data.get("gaps")):
+        problems.append("gaps must be a list of strings")
     if problems:
         raise SchemaError(problems)
     return data

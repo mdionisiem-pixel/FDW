@@ -18,7 +18,7 @@ Two production tiers, always labelled:
 
 Audience: 1,000 to 5,000 followers who came for handmade work and already ask to buy. They ask about embroidered clothing, crochet clothing, accessories and custom pieces.
 
-Positioning: luxury means material quality, finish and scarcity. It does not mean trend-chasing. A trend is used only when it fits the brand and has evidence behind it.
+Positioning: luxury means material quality, finish and scarcity. Malina follows demand wherever the market shows it, including new categories; pieces outside the current techniques can be outsourced.
 
 Signature elements (To confirm): motifs, stitches or shapes that recur across pieces.
 Colour palette (To confirm): named colours with hex values.
@@ -179,6 +179,13 @@ class TrendFinding(models.Model):
     # recurring: seen in the same season in earlier years. current: rising now. both: each.
     timeframe = models.CharField(max_length=10, blank=True)
     seasons_observed = models.CharField(max_length=200, blank=True)
+    category = models.CharField(max_length=20, blank=True)
+    momentum = models.CharField(max_length=10, blank=True)
+    # core: Malina's current techniques. adjacent: with a partner. outside: new category or supplier.
+    malina_fit = models.CharField(max_length=10, blank=True)
+    # Only figures whose number appears in the evidence text are stored.
+    figures = models.JSONField(default=list, blank=True)
+    forecast = models.JSONField(null=True, blank=True)
     # True only when the URL was among the search results the model received.
     verified = models.BooleanField(default=False)
 
