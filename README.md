@@ -7,8 +7,8 @@ This is **slice 1** of the specification. It covers the first two of seven stage
 
 | Stage | Status | What it does |
 | --- | --- | --- |
-| 1. Market research | Built | Searches the web for current demand, checks every source, and writes a research brief. Nothing needs to be typed; a direction and audience messages are optional |
-| 2. Collection concepts | Built | Designs three new collections from the brief, reviews each one separately, you pick one or two |
+| 1. Market research | Built | Searches the web for current demand, checks every source, and writes a research brief. It compares the target season across the last two to three years with what is rising now. Nothing needs to be typed; a target season, a direction and audience messages are optional |
+| 2. Collection concepts | Built | Plans three new collections in one call, then specifies each in its own call so no answer is cut off; reviews each one separately; you pick one or two |
 | 3. Sourcing check | Not built | Slice 2 |
 | 4. Visual prototypes | Not built | Slice 2 |
 | 5. 3D generation | Not built | Slice 3 |
@@ -73,7 +73,7 @@ These are enforced in code, not by prompts.
   search actually returned in that run. This is checked in code. Findings that fail
   are shown as left out.
 - **Search cap.** One research run makes at most `FDW_RESEARCH_MAX_SEARCHES` searches
-  (default 8). Searches are priced at `FDW_SEARCH_PRICE_USD` each and counted in the
+  (default 12). Searches are priced at `FDW_SEARCH_PRICE_USD` each and counted in the
   cycle's spend.
 - **Gates.** Stage 2 refuses to run without an approved research brief. A brief can be
   decided once. Concept selection accepts one or two concepts from the same cycle.

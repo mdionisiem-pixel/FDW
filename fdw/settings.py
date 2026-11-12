@@ -144,5 +144,5 @@ FDW_EXTRACT_BATCH_SIZE = int(os.environ.get("FDW_EXTRACT_BATCH_SIZE", "40"))
 # ($10 per 1,000 searches), read 12 November 2026.
 FDW_SEARCH_PRICE_USD = Decimal(os.environ.get("FDW_SEARCH_PRICE_USD", "0.01"))
 # Hard cap on searches in one research run.
-FDW_RESEARCH_MAX_SEARCHES = int(os.environ.get("FDW_RESEARCH_MAX_SEARCHES", "8"))
+FDW_RESEARCH_MAX_SEARCHES = int(os.environ.get("FDW_RESEARCH_MAX_SEARCHES", "12"))
 FDW_WEB_SEARCH_TOOL = os.environ.get("FDW_WEB_SEARCH_TOOL", "web_search_20250305")

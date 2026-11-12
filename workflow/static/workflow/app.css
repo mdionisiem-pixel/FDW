@@ -391,3 +391,67 @@ thead th { font-size: 0.82rem; color: var(--ink-soft); font-weight: 600; border-
 .finding .source:hover { color: var(--floss-deep); }
 .finding.is-dropped { border-style: dashed; opacity: 0.7; }
 .note-plain { border-top: 0; padding-top: 0; margin: 0 0 1rem; max-width: var(--measure); }
+
+/* Season inputs and time-frame labels */
+.season-fields { display: grid; grid-template-columns: minmax(12rem, 16rem) minmax(7rem, 9rem) minmax(0, 1fr); gap: 1rem; align-items: end; margin-bottom: 1rem; }
+.season-help { align-self: center; max-width: 48ch; }
+.timeframe { font-size: 0.8rem; font-weight: 600; color: var(--ink-soft); }
+.timeframe-recurring, .timeframe-both { color: var(--moss); }
+.timeframe .meta { font-weight: 400; font-size: 0.8rem; }
+@media (max-width: 60rem) { .season-fields { grid-template-columns: 1fr 1fr; } .season-help { grid-column: 1 / -1; } }
+
+/* Structured research brief */
+.brief { padding: 1.5rem clamp(1rem, 3vw, 1.75rem) 1.75rem; }
+.brief-head { align-items: flex-start; }
+.brief-summary { font-size: 1.15rem; line-height: 1.5; max-width: 62ch; margin-bottom: 1.75rem; }
+.brief-label { font-size: 0.85rem; font-weight: 700; color: var(--ink-soft); margin: 1.75rem 0 0.6rem; padding-bottom: 0.4rem; border-bottom: 1.5px solid var(--line); }
+.brief-summary + .brief-label { margin-top: 0; }
+
+.themes { list-style: none; margin: 0; padding: 0; }
+.theme { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 1.25rem; padding: 1rem 0; border-bottom: 1px solid var(--chalk); }
+.theme:last-child { border-bottom: 0; }
+.theme-rating { display: grid; gap: 0.35rem; align-content: start; padding-top: 0.25rem; }
+.meter { gap: 5px; }
+.meter .stitch { width: 22px; height: 6px; }
+.theme-strength { font-family: var(--display); font-weight: 700; font-size: 0.95rem; }
+.strength-strong .stitch.on { background: var(--moss); }
+.strength-strong .theme-strength { color: var(--moss); }
+.strength-weak .theme-strength, .strength-untested .theme-strength { color: var(--ink-soft); }
+.strength-untested .stitch { background: transparent; border: 1.5px dashed var(--line); height: 6px; }
+.theme-body { display: grid; gap: 0.35rem; }
+.theme-body h5 { font-size: 1.15rem; margin: 0; }
+.theme-body p { max-width: 64ch; }
+.theme-tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.2rem; }
+.chip-time-both, .chip-time-recurring { background: var(--moss-wash); color: var(--moss); font-weight: 600; }
+.theme-sources { font-size: 0.875rem; color: var(--ink-soft); }
+.theme-sources a:hover, .finding .source:hover { color: var(--floss-deep); }
+
+.season-view { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; }
+.season-col { border-radius: var(--radius); padding: 0.9rem 1rem; background: var(--chalk); border-top: 4px solid var(--ink-soft); }
+.season-col h5 { font-size: 0.95rem; margin-bottom: 0.4rem; }
+.season-col ul { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.25rem; }
+.season-returns { border-top-color: var(--moss); }
+.season-new { border-top-color: var(--ink); }
+.season-fading { border-top-color: var(--floss); }
+
+.brief-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 2rem; }
+.brief-pair p { max-width: 52ch; margin-bottom: 0.4rem; }
+.verdict-supported { background: var(--moss-wash); color: var(--moss); }
+.verdict-mixed { background: var(--ochre-wash); color: var(--ochre); }
+.verdict-contradicted { background: var(--floss-wash); color: var(--floss-deep); }
+.verdict-untested, .verdict-none_given { background: var(--chalk); color: var(--ink-soft); }
+.plain-list { margin: 0; padding-left: 1.1rem; display: grid; gap: 0.3rem; max-width: 68ch; }
+
+.fold-evidence { margin-top: 1.25rem; }
+.finding-group + .finding-group { margin-top: 0.5rem; }
+.finding h5 { font-size: 1.02rem; margin: 0; }
+.finding-facts { margin: 0.2rem 0 0; display: grid; gap: 0.3rem; font-size: 0.875rem; }
+.finding-facts div { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 0.6rem; }
+.finding-facts dt { color: var(--ink-soft); font-weight: 600; }
+.finding-facts dd { margin: 0; }
+
+@media (max-width: 60rem) {
+  .theme { grid-template-columns: 1fr; gap: 0.4rem; }
+  .theme-rating { display: flex; align-items: center; gap: 0.6rem; }
+  .season-view, .brief-pair { grid-template-columns: 1fr; }
+}

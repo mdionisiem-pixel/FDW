@@ -75,84 +75,102 @@ def sample_source_urls() -> list:
     return [f[4] for f in SAMPLE_FINDINGS]
 
 
+SAMPLE_TIMEFRAMES = [
+    ("recurring", "Sample: Autumn/Winter 2024 and 2025"),
+    ("both", "Sample: Autumn/Winter 2025 and this year"),
+    ("current", None),
+    ("current", None),
+]
+
+
 def _research(prompt: str) -> str:
     findings = [
-        {"theme": t, "what_people_want": w, "evidence": e, "source_title": title,
-         "source_url": url, "source_date": date,
+        {"theme": t, "what_people_want": w, "evidence": e,
+         "timeframe": SAMPLE_TIMEFRAMES[i][0], "seasons_observed": SAMPLE_TIMEFRAMES[i][1],
+         "source_title": title, "source_url": url, "source_date": date,
          "relevance": "Sample relevance: fits craft techniques named in the brand brief."}
-        for t, w, e, title, url, date in SAMPLE_FINDINGS
+        for i, (t, w, e, title, url, date) in enumerate(SAMPLE_FINDINGS)
     ]
     return json.dumps({"findings": findings, "searches_summary": "Sample searches; no web search was run."})
 
 
 def _demand_brief(prompt: str) -> str:
-    try:
-        signals = json.loads(_between(prompt, "audience_signals") or "[]")
-    except json.JSONDecodeError:
-        signals = []
-    try:
-        findings = json.loads(_between(prompt, "trend_findings") or "[]")
-    except json.JSONDecodeError:
-        findings = []
+    def load(tag):
+        try:
+            return json.loads(_between(prompt, tag) or "[]")
+        except json.JSONDecodeError:
+            return []
+
+    signals, findings = load("audience_signals"), load("trend_findings")
     direction = _between(prompt, "founder_direction").strip()
-    purchase = [s for s in signals if s.get("intent") == "purchase"]
-    interest = [s for s in signals if s.get("intent") == "interest"]
-    trend = [s for s in signals if s.get("intent") == "trend"]
-    counts = {}
-    for s in signals:
-        key = s.get("product_type") or "unspecified pieces"
-        counts.setdefault(key, {"purchase": 0, "interest": 0, "trend": 0, "quotes": []})
-        counts[key][s.get("intent", "interest")] += 1
-        if s.get("quote") and len(counts[key]["quotes"]) < 2:
-            counts[key]["quotes"].append(s["quote"])
-    ranked = sorted(counts.items(), key=lambda kv: (-kv[1]["purchase"], -kv[1]["interest"]))[:5]
-
-    def strength(c):
-        if c["purchase"] >= 5:
-            return "strong"
-        if c["purchase"] >= 2:
-            return "moderate"
-        return "weak"
-
+    season = (_between(prompt, "target_season").strip().splitlines() or ["Not set"])[0]
     has_direction = bool(direction) and not direction.lower().startswith("none given")
-    lines = [
-        "SAMPLE RESEARCH BRIEF (dry run: written by simple rules, not by a model)",
-        "",
-        f"Read: {len(findings)} web research findings and {len(signals)} audience signals "
-        f"({len(purchase)} purchase intent, {len(interest)} interest, {len(trend)} external).",
-        "",
-        "1. Top demand themes",
-    ]
-    for f in findings[:5]:
-        lines.append(
-            f"- {f.get('theme')}: {f.get('what_people_want')} Rests on web research "
-            f"({f.get('source_title')}). Evidence: weak, single source."
-        )
-    for name, c in ranked:
-        quotes = "; ".join(f'"{q}"' for q in c["quotes"]) or "no quotes"
-        lines.append(
-            f"- {name.capitalize()}: {c['purchase']} purchase-intent and {c['interest']} interest "
-            f"signals, {c['trend']} external. Evidence: {strength(c)}. Quotes: {quotes}."
-        )
-    lines += [
-        "",
-        "Founder's direction",
-        (f"Given: {direction} Evidence: untested until the price test." if has_direction
-         else "No direction was given."),
-    ]
-    lines += [
-        "",
-        "2. Earlier price tests",
-        "None yet. This is the first cycle.",
-        "",
-        "3. Gaps",
-        "- No prices have been shown to the audience, so willingness to pay is unknown.",
-        "- External trend data is thin or missing until Pinterest and Google access is granted.",
-        "",
-        "4. Conflicts with the brand brief",
-        "None found by the dry-run rules.",
-    ]
-    return "\n".join(lines)
+    purchase = sum(1 for s in signals if s.get("intent") == "purchase")
+    interest = sum(1 for s in signals if s.get("intent") == "interest")
+
+    themes = []
+    for f in findings[:4]:
+        timeframe = f.get("timeframe") if f.get("timeframe") in ("recurring", "current", "both") else "current"
+        recurring = timeframe in ("recurring", "both")
+        themes.append({
+            "name": f.get("theme"),
+            "what_people_want": f.get("what_people_want"),
+            "strength": "moderate" if recurring else "weak",
+            "strength_reason": ("Sample rating: seen in more than one past season."
+                                if recurring else "Sample rating: a single source."),
+            "timeframe": timeframe,
+            "basis": ["web_research"],
+            "sources": [{"title": f.get("source_title") or "Source", "url": f.get("source_url")}],
+            "audience_signals": None,
+        })
+    if signals:
+        themes.insert(0, {
+            "name": "What your audience asks for",
+            "what_people_want": "Sample theme built from the messages you added.",
+            "strength": "strong" if purchase else "weak",
+            "strength_reason": "Sample rating: based on purchase-intent messages from your own audience.",
+            "timeframe": "not_applicable",
+            "basis": ["audience_signals"],
+            "sources": [],
+            "audience_signals": f"{purchase} asked to buy, {interest} showed interest",
+        })
+    if has_direction and len(themes) < 5:
+        themes.append({
+            "name": "Your direction",
+            "what_people_want": direction[:200],
+            "strength": "untested",
+            "strength_reason": "Sample rating: nothing was found for or against it; the price test decides.",
+            "timeframe": "not_applicable",
+            "basis": ["founder_direction"],
+            "sources": [],
+            "audience_signals": None,
+        })
+    if not themes:
+        themes.append({
+            "name": "No themes found", "what_people_want": "The sample research returned nothing to work from.",
+            "strength": "untested", "strength_reason": "Sample rating: no evidence.", "timeframe": "not_applicable",
+            "basis": ["founder_direction"], "sources": [], "audience_signals": None,
+        })
+    order = {"strong": 0, "moderate": 1, "weak": 2, "untested": 3}
+    themes = sorted(themes[:5], key=lambda t: order[t["strength"]])
+    return json.dumps({
+        "season": season if not season.startswith("Not set") else "Next season (sample)",
+        "summary": "Sample research brief from the dry run, written by simple rules and not by a model. "
+                   f"It read {len(findings)} research findings and {len(signals)} audience signals.",
+        "themes": themes,
+        "season_view": {
+            "returns_every_year": [f.get("theme") for f in findings if f.get("timeframe") in ("recurring", "both")],
+            "new_this_year": [f.get("theme") for f in findings if f.get("timeframe") == "current"],
+            "fading": [],
+        },
+        "direction": {
+            "verdict": "untested" if has_direction else "none_given",
+            "explanation": "Sample verdict: the dry run cannot judge a direction." if has_direction else None,
+        },
+        "past_tests": "None yet.",
+        "gaps": ["Sample gap: no prices have been shown to the audience, so willingness to pay is unknown."],
+        "conflicts": [],
+    })
 
 
 def _piece(cid, n, name, role, category, silhouette, technique, construction, materials,
@@ -279,6 +297,30 @@ def _sample_concepts() -> dict:
     return {"concepts": [c1, c2, c3]}
 
 
+def _sample_plans() -> dict:
+    plans = []
+    for concept in _sample_concepts()["concepts"]:
+        plan = {k: concept[k] for k in ("concept_id", "name", "theme", "target_customer",
+                                         "signature_detail", "palette", "why_now", "basis")}
+        plan["pieces"] = [
+            {"piece_id": p["piece_id"], "name": p["name"], "role": p["role"], "category": p["category"],
+             "technique": p["technique"], "production_route": p["production_route"],
+             "target_price_eur": p["target_price_eur"], "idea": p["surface_detail"]}
+            for p in concept["pieces"]
+        ]
+        plans.append(plan)
+    return {"concepts": plans}
+
+
+def _detail(prompt: str) -> str:
+    match = re.search(r'"concept_id":\s*"([^"]+)"', _between(prompt, "concept_plan"))
+    concept_id = match.group(1) if match else "C1"
+    for concept in _sample_concepts()["concepts"]:
+        if concept["concept_id"] == concept_id:
+            return json.dumps(concept)
+    return "{}"
+
+
 SAMPLE_SCORES = {
     "C1": ({"demand_evidence": 4, "coherence": 5, "uniqueness": 4, "makeability": 3, "price_fit": 4, "spec_completeness": 4}, "recommend"),
     "C2": ({"demand_evidence": 3, "coherence": 5, "uniqueness": 4, "makeability": 4, "price_fit": 3, "spec_completeness": 4}, "recommend"),
@@ -324,6 +366,10 @@ def respond(step: str, prompt: str) -> str:
         return _demand_brief(prompt)
     if base == "generate_concepts":
         return json.dumps(_sample_concepts())
+    if base == "plan_concepts":
+        return json.dumps(_sample_plans())
+    if base == "detail_concept":
+        return _detail(prompt)
     if base == "review_concept":
         return _review(prompt)
     if base == "revise_concept":

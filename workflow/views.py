@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from . import stages
@@ -31,6 +32,97 @@ CRITERION_LABELS = {
     "price_fit": "Price fit",
     "spec_completeness": "Specification",
 }
+
+
+def _season_years():
+    """The years a collection can sensibly be planned for: this year and the next two."""
+    this_year = timezone.localdate().year
+    return [this_year, this_year + 1, this_year + 2]
+
+
+STRENGTH_LEVEL = {"strong": 3, "moderate": 2, "weak": 1, "untested": 0}
+TIMEFRAME_LABELS = {
+    "both": "Recurs and rising now",
+    "recurring": "Recurs in past seasons",
+    "current": "Current trend",
+}
+BASIS_LABELS = {
+    "web_research": "Web research",
+    "audience_signals": "Your audience",
+    "founder_direction": "Your direction",
+}
+VERDICT_LABELS = {
+    "supported": "Supported by the research",
+    "mixed": "Mixed evidence",
+    "contradicted": "The research points the other way",
+    "untested": "Untested: the price test decides",
+    "none_given": "No direction given",
+}
+
+
+def _brief_view(brief):
+    """Prepare the structured brief for display. Returns None for a text-only brief."""
+    if brief is None or not brief.data:
+        return None
+    data = brief.data
+    themes = []
+    for theme in data.get("themes", []):
+        themes.append({
+            **theme,
+            "level": STRENGTH_LEVEL.get(theme.get("strength"), 0),
+            "strength_label": str(theme.get("strength", "")).capitalize(),
+            "timeframe_label": TIMEFRAME_LABELS.get(theme.get("timeframe"), ""),
+            "basis_labels": [BASIS_LABELS.get(b, b) for b in theme.get("basis", [])],
+        })
+    direction = data.get("direction", {})
+    return {
+        "season": data.get("season", ""),
+        "summary": data.get("summary", ""),
+        "themes": themes,
+        "season_view": data.get("season_view", {}),
+        "direction": {
+            "verdict": direction.get("verdict", "none_given"),
+            "label": VERDICT_LABELS.get(direction.get("verdict"), ""),
+            "explanation": direction.get("explanation") or "",
+        },
+        "past_tests": data.get("past_tests", ""),
+        "gaps": data.get("gaps", []),
+        "conflicts": data.get("conflicts", []),
+    }
+
+
+def _finding_groups(findings):
+    """Verified findings grouped by time frame, strongest grouping first."""
+    groups = []
+    for key in ("both", "recurring", "current"):
+        items = [f for f in findings if f.verified and f.timeframe == key]
+        if items:
+            label = "Current trends" if key == "current" else TIMEFRAME_LABELS[key]
+            groups.append({"key": key, "label": label, "items": items})
+    unlabelled = [f for f in findings if f.verified and f.timeframe not in TIMEFRAME_LABELS]
+    if unlabelled:
+        groups.append({"key": "other", "label": "Findings", "items": unlabelled})
+    return groups
+
+
+def _apply_research_inputs(request, cycle):
+    """Save the season and direction from a posted form. Returns an error message, or None."""
+    season = request.POST.get("season", "")
+    if season not in Cycle.Season.values:
+        season = ""
+    year = None
+    raw_year = request.POST.get("season_year", "").strip()
+    if season and season != Cycle.Season.YEAR_ROUND and raw_year:
+        allowed = _season_years()
+        if raw_year.isdigit() and int(raw_year) in allowed:
+            year = int(raw_year)
+        else:
+            return f"Choose a year from {allowed[0]} to {allowed[-1]}."
+    cycle.direction = request.POST.get("direction", "").strip()[:4000]
+    cycle.season = season
+    cycle.season_year = year
+    cycle.save(update_fields=["direction", "season", "season_year"])
+    return None
 
 
 def _stage_rail(cycle):
@@ -132,6 +224,7 @@ def cycle_detail(request, pk):
     intent_counts = Counter(s.intent for s in signals)
     product_counts = Counter(s.product_type for s in signals if s.product_type).most_common(6)
     brief = cycle.latest_brief
+    findings = list(cycle.findings.all())
     cards = _concept_cards(cycle)
     pieces = [
         piece
@@ -145,7 +238,11 @@ def cycle_detail(request, pk):
         "raw_items": raw_items,
         "source_counts": Counter(i.get_source_display() for i in raw_items).most_common(),
         "sources": RawItem.Source.choices,
-        "findings": list(cycle.findings.all()),
+        "finding_groups": _finding_groups(findings),
+        "dropped_findings": [f for f in findings if not f.verified],
+        "bv": _brief_view(brief),
+        "seasons": Cycle.Season.choices,
+        "season_years": _season_years(),
         "signals": signals,
         "intent_counts": {
             "purchase": intent_counts.get("purchase", 0),
@@ -206,9 +303,11 @@ def save_direction(request, pk):
     if cycle.status not in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
         messages.error(request, "The direction is locked once a research brief has been written from it.")
         return redirect("cycle_detail", pk=pk)
-    cycle.direction = request.POST.get("direction", "").strip()[:4000]
-    cycle.save(update_fields=["direction"])
-    messages.success(request, "Direction saved." if cycle.direction else "Direction cleared.")
+    error = _apply_research_inputs(request, cycle)
+    if error:
+        messages.error(request, error)
+    else:
+        messages.success(request, "Research inputs saved.")
     return redirect("cycle_detail", pk=pk)
 
 
@@ -216,6 +315,13 @@ def save_direction(request, pk):
 @require_POST
 def run_stage1(request, pk):
     cycle = get_object_or_404(Cycle, pk=pk)
+    # The research button sits in the same form as the inputs, so whatever is on
+    # screen is what gets researched, saved or not.
+    if "season" in request.POST and cycle.status in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
+        error = _apply_research_inputs(request, cycle)
+        if error:
+            messages.error(request, error)
+            return redirect("cycle_detail", pk=pk)
     try:
         stages.run_stage1(cycle)
         messages.success(request, "Research finished and brief written. Read it and decide below.")

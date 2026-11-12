@@ -54,6 +54,47 @@ def _direction(cycle: Cycle) -> str:
     return cycle.direction.strip() or "None given."
 
 
+def brief_as_text(data: dict) -> str:
+    """The structured brief as plain text, for the designer step and for the record."""
+    lines = [f"Season: {data['season']}", "", data["summary"], "", "Demand themes, strongest first:"]
+    for i, theme in enumerate(data["themes"], 1):
+        basis = ", ".join(b.replace("_", " ") for b in theme["basis"])
+        lines.append(
+            f"{i}. {theme['name']} [evidence: {theme['strength']}; time frame: "
+            f"{theme['timeframe'].replace('_', ' ')}; rests on: {basis}]"
+        )
+        lines.append(f"   {theme['what_people_want']}")
+        lines.append(f"   Why this rating: {theme['strength_reason']}")
+        if theme.get("audience_signals"):
+            lines.append(f"   Audience signals: {theme['audience_signals']}")
+        for source in theme["sources"]:
+            lines.append(f"   Source: {source['title']} ({source['url']})")
+    view = data["season_view"]
+    lines += [
+        "",
+        "Season view:",
+        f"- Returns every year: {'; '.join(view['returns_every_year']) or 'nothing found'}",
+        f"- New this year: {'; '.join(view['new_this_year']) or 'nothing found'}",
+        f"- Fading, avoid: {'; '.join(view['fading']) or 'nothing found'}",
+        "",
+        f"Founder's direction: {data['direction']['verdict'].replace('_', ' ')}."
+        + (f" {data['direction']['explanation']}" if data["direction"].get("explanation") else ""),
+        "",
+        f"Earlier price tests: {data['past_tests']}",
+    ]
+    if data["gaps"]:
+        lines += ["", "Gaps:"] + [f"- {gap}" for gap in data["gaps"]]
+    if data["conflicts"]:
+        lines += ["", "Conflicts with the brand brief:"] + [f"- {c}" for c in data["conflicts"]]
+    return "\n".join(lines)
+
+
+def _target_season(cycle: Cycle) -> str:
+    if cycle.season_label:
+        return cycle.season_label
+    return "Not set. Research the next season to arrive in the markets named in the brand brief, and say which season that is."
+
+
 def run_research(cycle: Cycle, brand_brief: str, client) -> list:
     """Search the web for current demand and return findings, each marked verified or not.
 
@@ -65,6 +106,7 @@ def run_research(cycle: Cycle, brand_brief: str, client) -> list:
         prompts.RESEARCH_TRENDS,
         brand_brief=brand_brief,
         founder_direction=_direction(cycle),
+        target_season=_target_season(cycle),
         today=timezone.localdate().isoformat(),
     )
     result = run_result(
@@ -141,6 +183,7 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
         prompts.DEMAND_BRIEF,
         brand_brief=brand_brief,
         founder_direction=_direction(cycle),
+        target_season=_target_season(cycle),
         findings_json=json.dumps(
             [{k: v for k, v in f.items() if k != "verified"} for f in verified],
             ensure_ascii=False,
@@ -148,11 +191,12 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
         signals_json=json.dumps(extracted, ensure_ascii=False),
         past_test_results=NO_PAST_RESULTS,
     )
-    brief_text = run_call(
-        cycle, "demand_brief", brief_prompt, settings.FDW_MODEL_WRITER, 4000, client
-    ).strip()
-    if not brief_text:
-        raise StageError("The model returned an empty research brief. Nothing was saved.")
+    allowed_urls = {schemas.normalise_url(f["source_url"]) for f in verified}
+    brief_data = run_json(
+        cycle, "demand_brief", brief_prompt, settings.FDW_MODEL_WRITER, 5000,
+        lambda data: schemas.validate_brief(data, allowed_urls), client,
+    )
+    brief_text = brief_as_text(brief_data)
 
     with transaction.atomic():
         cycle.signals.all().delete()
@@ -181,11 +225,13 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
                 source_url=str(f["source_url"])[:1000],
                 source_date=str(f.get("source_date") or "")[:20],
                 relevance=str(f.get("relevance") or ""),
+                timeframe=f["timeframe"],
+                seasons_observed=str(f.get("seasons_observed") or "")[:200],
                 verified=f["verified"],
             )
             for f in findings
         )
-        brief = DemandBrief.objects.create(cycle=cycle, text=brief_text)
+        brief = DemandBrief.objects.create(cycle=cycle, data=brief_data, text=brief_text)
         cycle.status = Cycle.Status.BRIEF_PENDING
         cycle.save(update_fields=["status"])
     return brief
@@ -243,7 +289,7 @@ def _review(cycle, concept_data, brand_brief, brief_text, client):
 
 
 def run_stage2(cycle: Cycle, client=None) -> list:
-    """Generate three collection concepts and review each one separately."""
+    """Plan three collection concepts, specify each one, and review each one separately."""
     brief = cycle.approved_brief
     if cycle.status != Cycle.Status.BRIEF_APPROVED or brief is None:
         raise GateError(
@@ -252,18 +298,36 @@ def run_stage2(cycle: Cycle, client=None) -> list:
     client = client or get_client()
     brand_brief = BrandBrief.current().text
 
-    prompt = prompts.render(
-        prompts.GENERATE_CONCEPTS,
+    # Planning and specifying are separate calls. Three fully specified
+    # collections do not fit in one answer, and a cut-off answer saves nothing.
+    plan_prompt = prompts.render(
+        prompts.PLAN_CONCEPTS,
         brand_brief=brand_brief,
         approved_demand_brief=brief.text,
         founder_direction=_direction(cycle),
+        target_season=_target_season(cycle),
         gate1_notes=brief.founder_notes or "No notes.",
         past_test_results=NO_PAST_RESULTS,
     )
-    generated = run_json(
-        cycle, "generate_concepts", prompt, settings.FDW_MODEL_WRITER,
-        16000, schemas.validate_concepts, client,
+    plans = run_json(
+        cycle, "plan_concepts", plan_prompt, settings.FDW_MODEL_WRITER,
+        6000, schemas.validate_concept_plans, client,
     )
+    generated = {"concepts": []}
+    for plan in plans["concepts"]:
+        detail_prompt = prompts.render(
+            prompts.DETAIL_CONCEPT,
+            brand_brief=brand_brief,
+            approved_demand_brief=brief.text,
+            target_season=_target_season(cycle),
+            concept_plan_json=json.dumps(plan, ensure_ascii=False, indent=1),
+        )
+        generated["concepts"].append(
+            run_json(
+                cycle, "detail_concept", detail_prompt, settings.FDW_MODEL_WRITER, 12000,
+                lambda data, plan=plan: schemas.validate_concept_against_plan(data, plan), client,
+            )
+        )
 
     results = []
     for concept_data in generated["concepts"]:
@@ -279,7 +343,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
             )
             revised = run_json(
                 cycle, "revise_concept", revise_prompt, settings.FDW_MODEL_WRITER,
-                8000, schemas.validate_single_concept, client,
+                12000, schemas.validate_single_concept, client,
             )
             # The revision must stay the same concept, whatever the model returned.
             revised["concept_id"] = concept_data["concept_id"]

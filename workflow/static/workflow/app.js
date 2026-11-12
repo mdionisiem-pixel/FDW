@@ -7,10 +7,12 @@
   // Working overlay for forms that call the model.
   var overlay = document.getElementById("working");
   var overlayTitle = document.getElementById("working-title");
-  document.querySelectorAll("form[data-working]").forEach(function (form) {
-    form.addEventListener("submit", function () {
-      if (!overlay) return;
-      overlayTitle.textContent = form.getAttribute("data-working");
+  document.querySelectorAll("form").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+      // The label can sit on the form or on the button that submitted it.
+      var label = (event.submitter && event.submitter.getAttribute("data-working")) || form.getAttribute("data-working");
+      if (!overlay || !label) return;
+      overlayTitle.textContent = label;
       overlay.hidden = false;
       form.querySelectorAll("button[type=submit]").forEach(function (button) {
         // Disable after the submit has been dispatched, so the form still posts.
