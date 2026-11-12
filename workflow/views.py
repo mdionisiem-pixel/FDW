@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from . import stages
+from . import charts, stages
 from .llm import StageError
 from .models import BrandBrief, Concept, Cycle, DemandBrief, RawItem
 from .schemas import REVIEW_CRITERIA
@@ -60,26 +60,46 @@ VERDICT_LABELS = {
 }
 
 
-def _brief_view(brief):
-    """Prepare the structured brief for display. Returns None for a text-only brief."""
-    if brief is None or not brief.data:
+CATEGORY_LABELS = charts.CATEGORY_LABELS
+MOMENTUM_LABELS = charts.MOMENTUM_LABELS
+
+
+def _brief_view(brief, findings):
+    """Prepare the market report for the dashboard. Returns None for an older text-only brief."""
+    if brief is None or not brief.data or "headline" not in brief.data:
         return None
     data = brief.data
     themes = []
-    for theme in data.get("themes", []):
+    for number, theme in enumerate(data.get("themes", []), 1):
         themes.append({
             **theme,
+            "number": number,
             "level": STRENGTH_LEVEL.get(theme.get("strength"), 0),
             "strength_label": str(theme.get("strength", "")).capitalize(),
             "timeframe_label": TIMEFRAME_LABELS.get(theme.get("timeframe"), ""),
+            "momentum_label": MOMENTUM_LABELS.get(theme.get("momentum"), ""),
+            "category_label": CATEGORY_LABELS.get(theme.get("category"), ""),
             "basis_labels": [BASIS_LABELS.get(b, b) for b in theme.get("basis", [])],
         })
     direction = data.get("direction", {})
+    percentages, other_figures = charts.reported_figures(findings)
     return {
         "season": data.get("season", ""),
-        "summary": data.get("summary", ""),
+        "headline": data.get("headline", ""),
+        "takeaways": data.get("key_takeaways", []),
+        "kpis": charts.kpis(findings, data),
         "themes": themes,
+        "matrix": charts.opportunity_matrix(themes) if themes else "",
+        "periods": data.get("timeline_periods", []),
+        "timeline": charts.timeline_rows(themes, data.get("timeline_periods", [])),
+        "market_shifts": data.get("market_shifts", []),
+        "percent_figures": percentages,
+        "other_figures": other_figures,
+        "forecasts": charts.published_forecasts(findings),
+        "category_mix": charts.category_mix(findings),
         "season_view": data.get("season_view", {}),
+        "beyond": data.get("beyond_current_range", []),
+        "implications": data.get("implications", []),
         "direction": {
             "verdict": direction.get("verdict", "none_given"),
             "label": VERDICT_LABELS.get(direction.get("verdict"), ""),
@@ -87,7 +107,6 @@ def _brief_view(brief):
         },
         "past_tests": data.get("past_tests", ""),
         "gaps": data.get("gaps", []),
-        "conflicts": data.get("conflicts", []),
     }
 
 
@@ -240,7 +259,7 @@ def cycle_detail(request, pk):
         "sources": RawItem.Source.choices,
         "finding_groups": _finding_groups(findings),
         "dropped_findings": [f for f in findings if not f.verified],
-        "bv": _brief_view(brief),
+        "bv": _brief_view(brief, findings),
         "seasons": Cycle.Season.choices,
         "season_years": _season_years(),
         "signals": signals,

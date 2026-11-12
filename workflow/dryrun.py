@@ -55,41 +55,55 @@ def _extract_signals(prompt: str) -> str:
     return json.dumps(signals)
 
 
+# Sample findings: (theme, category, want, evidence, timeframe, momentum, seasons, figures, forecast, fit, title, url, date)
 SAMPLE_FINDINGS = [
-    ("Chunky hand-knit accessories", "Sample finding. Oversized hand-knit hats, balaclavas and mittens in undyed wool.",
-     "Sample evidence: a marketplace trend report names hand-knit winter accessories among its fastest-growing searches.",
-     "Sample marketplace trend report", "https://example.com/sample/marketplace-trends", "2026-10"),
-    ("Embroidered everyday knitwear", "Sample finding. Plain knit cardigans and vests with one small embroidered motif.",
-     "Sample evidence: a retailer reports embroidered knitwear selling out ahead of plain styles.",
-     "Sample retailer season report", "https://example.com/sample/retailer-report", "2026-09"),
-    ("Open crochet layering pieces", "Sample finding. Crochet tops, collars and overdresses worn over plain clothes.",
-     "Sample evidence: a trade article reports rising search interest in crochet layering for spring.",
-     "Sample trade press article", "https://example.com/sample/trade-article", "2026-10"),
-    ("Graphic two-colour jacquard", "Sample finding. Bold two-colour patterned knits at accessible prices.",
-     "Sample evidence: a resale platform lists patterned jacquard knits among its most-saved items.",
-     "Sample resale platform data", "https://example.com/sample/resale-data", "2026-08"),
+    ("Chunky hand-knit accessories", "accessories",
+     "Sample finding. Oversized hand-knit hats, balaclavas and mittens in undyed wool.",
+     "Sample evidence: a marketplace trend report says searches for hand-knit winter accessories grew 38% year on year.",
+     "recurring", "rising", "Sample: Autumn/Winter 2024 and 2025",
+     [{"label": "search growth year on year", "value": 38, "unit": "%", "period": "Autumn/Winter 2025"}], None,
+     "core", "Sample marketplace trend report", "https://marketplace.example/sample/trends", "2026-10"),
+    ("Embroidered everyday knitwear", "knitwear",
+     "Sample finding. Plain knit cardigans and vests with one small embroidered motif.",
+     "Sample evidence: a retailer reports embroidered knitwear sales up 22% and selling out ahead of plain styles.",
+     "both", "rising", "Sample: Autumn/Winter 2025 and this year",
+     [{"label": "sales growth", "value": 22, "unit": "%", "period": "this season"}],
+     {"statement": "Sample forecast: the retailer expects embroidered knitwear to keep growing through 2027.",
+      "horizon": "2027", "value": None, "unit": None},
+     "core", "Sample retailer season report", "https://retailer.example/sample/season-report", "2026-09"),
+    ("Structured suede shoulder bags", "bags",
+     "Sample finding. Compact structured shoulder bags in brown suede, priced 150 to 300 euros.",
+     "Sample evidence: a resale platform reports demand for suede bags up 64% on last year.",
+     "current", "rising", None,
+     [{"label": "resale demand growth", "value": 64, "unit": "%", "period": "last 12 months"}],
+     {"statement": "Sample forecast: the platform projects suede accessories to grow 15% in 2027.",
+      "horizon": "2027", "value": 15, "unit": "%"},
+     "outside", "Sample resale platform data", "https://resale.example/sample/data", "2026-08"),
+    ("Quilted liner jackets", "outerwear",
+     "Sample finding. Lightweight quilted liner jackets worn as a layer, in muted colours.",
+     "Sample evidence: a trade article reports quilted outerwear has held steady for three winters.",
+     "recurring", "stable", "Sample: Autumn/Winter 2023 to 2025", [], None,
+     "adjacent", "Sample trade press article", "https://tradepress.example/sample/article", "2026-10"),
+    ("Open crochet layering pieces", "apparel",
+     "Sample finding. Crochet tops and collars worn over plain clothes.",
+     "Sample evidence: a search report says crochet searches fell 12% after two strong summers.",
+     "both", "fading", "Sample: Spring/Summer 2024 and 2025",
+     [{"label": "search change", "value": -12, "unit": "%", "period": "year on year"}], None,
+     "core", "Sample search trend report", "https://search-trends.example/sample/report", "2026-07"),
 ]
 
 
 def sample_source_urls() -> list:
-    return [f[4] for f in SAMPLE_FINDINGS]
-
-
-SAMPLE_TIMEFRAMES = [
-    ("recurring", "Sample: Autumn/Winter 2024 and 2025"),
-    ("both", "Sample: Autumn/Winter 2025 and this year"),
-    ("current", None),
-    ("current", None),
-]
+    return [f[11] for f in SAMPLE_FINDINGS]
 
 
 def _research(prompt: str) -> str:
     findings = [
-        {"theme": t, "what_people_want": w, "evidence": e,
-         "timeframe": SAMPLE_TIMEFRAMES[i][0], "seasons_observed": SAMPLE_TIMEFRAMES[i][1],
-         "source_title": title, "source_url": url, "source_date": date,
-         "relevance": "Sample relevance: fits craft techniques named in the brand brief."}
-        for i, (t, w, e, title, url, date) in enumerate(SAMPLE_FINDINGS)
+        {"theme": t, "category": cat, "what_people_want": w, "evidence": e, "timeframe": tf,
+         "momentum": mom, "seasons_observed": seasons, "figures": figs, "forecast": fc,
+         "malina_fit": fit, "source_title": title, "source_url": url, "source_date": date,
+         "relevance": "Sample relevance."}
+        for t, cat, w, e, tf, mom, seasons, figs, fc, fit, title, url, date in SAMPLE_FINDINGS
     ]
     return json.dumps({"findings": findings, "searches_summary": "Sample searches; no web search was run."})
 
@@ -106,70 +120,115 @@ def _demand_brief(prompt: str) -> str:
     season = (_between(prompt, "target_season").strip().splitlines() or ["Not set"])[0]
     has_direction = bool(direction) and not direction.lower().startswith("none given")
     purchase = sum(1 for s in signals if s.get("intent") == "purchase")
-    interest = sum(1 for s in signals if s.get("intent") == "interest")
-
+    periods = ["AW 2023", "AW 2024", "AW 2025", "Now"]
+    fit_score = {"core": 5, "adjacent": 3, "outside": 2}
+    history_for = {
+        ("recurring", "rising"): ["emerging", "established", "established", "peak"],
+        ("both", "rising"): ["unknown", "emerging", "established", "peak"],
+        ("current", "rising"): ["absent", "absent", "emerging", "established"],
+        ("recurring", "stable"): ["established", "established", "established", "established"],
+        ("both", "fading"): ["emerging", "peak", "peak", "declining"],
+    }
     themes = []
-    for f in findings[:4]:
-        timeframe = f.get("timeframe") if f.get("timeframe") in ("recurring", "current", "both") else "current"
-        recurring = timeframe in ("recurring", "both")
+    for f in findings[:5]:
+        key = (f.get("timeframe"), f.get("momentum"))
+        levels = history_for.get(key, ["unknown"] * 4)
+        recurring = f.get("timeframe") in ("recurring", "both")
         themes.append({
             "name": f.get("theme"),
+            "category": f.get("category") or "other",
             "what_people_want": f.get("what_people_want"),
             "strength": "moderate" if recurring else "weak",
             "strength_reason": ("Sample rating: seen in more than one past season."
                                 if recurring else "Sample rating: a single source."),
-            "timeframe": timeframe,
+            "timeframe": f.get("timeframe") or "current",
+            "momentum": f.get("momentum") or "stable",
+            "attractiveness": {"rising": 4, "stable": 3, "fading": 2}.get(f.get("momentum"), 3) + (1 if f.get("figures") and f.get("momentum") == "rising" else 0),
+            "fit": fit_score.get(f.get("malina_fit"), 3),
+            "fit_note": {"core": "Sample note: Malina can make this in house.",
+                         "adjacent": "Sample note: needs a partner workshop.",
+                         "outside": "Sample note: needs a new supplier in a new category."}.get(f.get("malina_fit"), "Sample note."),
+            "history": [{"period": p, "level": l} for p, l in zip(periods, levels)],
+            "outlook": {"level": {"rising": "established", "stable": "established", "fading": "declining"}.get(f.get("momentum"), "unknown"),
+                        "reason": "Sample outlook: based on momentum in the findings."},
             "basis": ["web_research"],
             "sources": [{"title": f.get("source_title") or "Source", "url": f.get("source_url")}],
             "audience_signals": None,
         })
-    if signals:
-        themes.insert(0, {
-            "name": "What your audience asks for",
+    if signals and len(themes) < 6:
+        themes.append({
+            "name": "What your audience asks for", "category": "other",
             "what_people_want": "Sample theme built from the messages you added.",
             "strength": "strong" if purchase else "weak",
-            "strength_reason": "Sample rating: based on purchase-intent messages from your own audience.",
-            "timeframe": "not_applicable",
-            "basis": ["audience_signals"],
-            "sources": [],
-            "audience_signals": f"{purchase} asked to buy, {interest} showed interest",
+            "strength_reason": "Sample rating: based on messages from your own audience.",
+            "timeframe": "not_applicable", "momentum": "stable", "attractiveness": 3, "fit": 5,
+            "fit_note": "Sample note: Malina already makes these.",
+            "history": [{"period": p, "level": "unknown"} for p in periods],
+            "outlook": {"level": "unknown", "reason": "Sample outlook: no forecast found."},
+            "basis": ["audience_signals"], "sources": [],
+            "audience_signals": f"{purchase} asked to buy",
         })
-    if has_direction and len(themes) < 5:
+    if has_direction and len(themes) < 6:
         themes.append({
-            "name": "Your direction",
-            "what_people_want": direction[:200],
-            "strength": "untested",
-            "strength_reason": "Sample rating: nothing was found for or against it; the price test decides.",
-            "timeframe": "not_applicable",
-            "basis": ["founder_direction"],
-            "sources": [],
-            "audience_signals": None,
+            "name": "Your direction", "category": "other", "what_people_want": direction[:200],
+            "strength": "untested", "strength_reason": "Sample rating: the price test decides.",
+            "timeframe": "not_applicable", "momentum": "stable", "attractiveness": 3, "fit": 4,
+            "fit_note": "Sample note: close to Malina's current range.",
+            "history": [{"period": p, "level": "unknown"} for p in periods],
+            "outlook": {"level": "unknown", "reason": "Sample outlook: nothing found."},
+            "basis": ["founder_direction"], "sources": [], "audience_signals": None,
         })
     if not themes:
         themes.append({
-            "name": "No themes found", "what_people_want": "The sample research returned nothing to work from.",
+            "name": "No themes found", "category": "other", "what_people_want": "The sample research returned nothing.",
             "strength": "untested", "strength_reason": "Sample rating: no evidence.", "timeframe": "not_applicable",
+            "momentum": "stable", "attractiveness": 1, "fit": 1, "fit_note": "Sample note.",
+            "history": [{"period": p, "level": "unknown"} for p in periods],
+            "outlook": {"level": "unknown", "reason": "Sample outlook."},
             "basis": ["founder_direction"], "sources": [], "audience_signals": None,
         })
-    order = {"strong": 0, "moderate": 1, "weak": 2, "untested": 3}
-    themes = sorted(themes[:5], key=lambda t: order[t["strength"]])
+    for t in themes:
+        t["attractiveness"] = max(1, min(5, t["attractiveness"]))
+    themes.sort(key=lambda t: -t["attractiveness"])
+    outside = [f for f in findings if f.get("malina_fit") == "outside"]
     return json.dumps({
         "season": season if not season.startswith("Not set") else "Next season (sample)",
-        "summary": "Sample research brief from the dry run, written by simple rules and not by a model. "
-                   f"It read {len(findings)} research findings and {len(signals)} audience signals.",
-        "themes": themes,
+        "headline": "Sample headline: grow from knitwear into accessories, where demand is rising fastest.",
+        "key_takeaways": [
+            {"headline": "Sample takeaway: hand-knit accessories recur every winter and are still growing.",
+             "so_what": "Sample: a safe core for the collection."},
+            {"headline": "Sample takeaway: the fastest growth is in a category Malina does not make yet.",
+             "so_what": "Sample: worth testing with a partner."},
+            {"headline": "Sample takeaway: crochet layering is fading after two strong summers.",
+             "so_what": "Sample: avoid building a collection on it."},
+        ],
+        "timeline_periods": periods,
+        "themes": themes[:6],
+        "market_shifts": [
+            {"from": "Sample: statement crochet", "to": "Sample: quiet knitwear with one detail",
+             "evidence": "Sample: search and retailer reports."},
+        ],
         "season_view": {
-            "returns_every_year": [f.get("theme") for f in findings if f.get("timeframe") in ("recurring", "both")],
+            "returns_every_year": [f.get("theme") for f in findings if f.get("timeframe") in ("recurring", "both") and f.get("momentum") != "fading"],
             "new_this_year": [f.get("theme") for f in findings if f.get("timeframe") == "current"],
-            "fading": [],
+            "fading": [f.get("theme") for f in findings if f.get("momentum") == "fading"],
         },
+        "beyond_current_range": [
+            {"opportunity": f.get("theme"), "why": f.get("evidence"),
+             "route": "Sample route: work with a specialist supplier."}
+            for f in outside
+        ],
+        "implications": [
+            {"title": "Sample: anchor on recurring knit accessories", "action": "Sample: build the core of the collection on demand that returns every winter."},
+            {"title": "Sample: test one piece outside the range", "action": "Sample: add a partner-made accessory to the price test."},
+            {"title": "Sample: drop fading themes", "action": "Sample: leave crochet layering out this season."},
+        ],
         "direction": {
             "verdict": "untested" if has_direction else "none_given",
             "explanation": "Sample verdict: the dry run cannot judge a direction." if has_direction else None,
         },
         "past_tests": "None yet.",
         "gaps": ["Sample gap: no prices have been shown to the audience, so willingness to pay is unknown."],
-        "conflicts": [],
     })
 
 

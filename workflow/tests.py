@@ -125,7 +125,7 @@ class Stage1Tests(TestCase):
         cycle.refresh_from_db()
         self.assertEqual(cycle.status, Cycle.Status.BRIEF_PENDING)
         self.assertEqual(brief.status, DemandBrief.Status.PENDING)
-        self.assertEqual(cycle.findings.filter(verified=True).count(), 4)
+        self.assertEqual(cycle.findings.filter(verified=True).count(), 5)
         self.assertEqual(cycle.signals.count(), 0)
 
     def test_stage1_writes_signals_and_pending_brief(self):
@@ -186,6 +186,7 @@ class ResearchTests(TestCase):
         data["findings"].append({
             "theme": "Invented theme", "what_people_want": "Something nobody reported.",
             "evidence": "No real source.", "timeframe": "current", "seasons_observed": None,
+            "category": "bags", "momentum": "rising", "malina_fit": "outside", "figures": [], "forecast": None,
             "source_title": "Made up", "source_url": extra_url,
             "source_date": None, "relevance": "",
         })
@@ -196,7 +197,7 @@ class ResearchTests(TestCase):
         fake_url = "https://not-in-results.example.org/report"
         client = ScriptedClient({"research_trends": [self._findings(fake_url)]})
         stages.run_stage1(cycle, client=client)
-        self.assertEqual(cycle.findings.filter(verified=True).count(), 4)
+        self.assertEqual(cycle.findings.filter(verified=True).count(), 5)
         dropped = cycle.findings.get(verified=False)
         self.assertEqual(dropped.source_url, fake_url)
         brief_call = ModelCall.objects.get(cycle=cycle, step="demand_brief")
@@ -246,7 +247,7 @@ class ResearchTests(TestCase):
         client2 = ScriptedClient({"research_trends": ["not json"], "reformat_findings": [good]})
         stages.run_stage1(cycle2, client=client2)
         self.assertEqual(client2.search_calls, 1)
-        self.assertEqual(cycle2.findings.filter(verified=True).count(), 4)
+        self.assertEqual(cycle2.findings.filter(verified=True).count(), 5)
 
     def test_target_season_reaches_research_brief_and_designer(self):
         cycle = Cycle.objects.create(name="Season", season="autumn_winter", season_year=2027)
@@ -271,7 +272,7 @@ class ResearchTests(TestCase):
         stages.run_stage1(cycle, client=ScriptedClient())
         self.assertEqual(
             sorted(cycle.findings.values_list("timeframe", flat=True)),
-            ["both", "current", "current", "recurring"],
+            ["both", "both", "current", "recurring", "recurring"],
         )
         data = json.loads(dryrun.respond("research_trends", ""))
         data["findings"][0]["timeframe"] = "probably recurring"
@@ -280,28 +281,37 @@ class ResearchTests(TestCase):
 
     def _brief_citing(self, url):
         return json.dumps({
-            "season": "Autumn/Winter", "summary": "Summary.",
+            "season": "Autumn/Winter", "headline": "Lead with accessories.",
+            "key_takeaways": [{"headline": "A finding.", "so_what": "A consequence."},
+                              {"headline": "Another finding.", "so_what": "Another consequence."}],
+            "timeline_periods": ["AW 2024", "AW 2025", "Now"],
             "themes": [{
-                "name": "Theme", "what_people_want": "Want.", "strength": "weak",
-                "strength_reason": "One source.", "timeframe": "current", "basis": ["web_research"],
-                "sources": [{"title": "A page", "url": url}], "audience_signals": None,
+                "name": "Theme", "category": "bags", "what_people_want": "Want.", "strength": "weak",
+                "strength_reason": "One source.", "timeframe": "current", "momentum": "rising",
+                "attractiveness": 4, "fit": 2, "fit_note": "Needs a supplier.",
+                "history": [{"period": "AW 2024", "level": "absent"}, {"period": "AW 2025", "level": "emerging"},
+                            {"period": "Now", "level": "established"}],
+                "outlook": {"level": "established", "reason": "Momentum."},
+                "basis": ["web_research"], "sources": [{"title": "A page", "url": url}], "audience_signals": None,
             }],
-            "season_view": {"returns_every_year": [], "new_this_year": ["Theme"], "fading": []},
+            "market_shifts": [], "season_view": {"returns_every_year": [], "new_this_year": ["Theme"], "fading": []},
+            "beyond_current_range": [], "implications": [{"title": "Do it", "action": "Because."}],
             "direction": {"verdict": "none_given", "explanation": None},
-            "past_tests": "None yet.", "gaps": [], "conflicts": [],
+            "past_tests": "None yet.", "gaps": [],
         })
 
     def test_brief_is_stored_as_structure_and_as_text_for_the_designer(self):
         cycle = Cycle.objects.create(name="Structured")
         brief = stages.run_stage1(cycle, client=ScriptedClient())
-        self.assertEqual(brief.data["themes"][0]["strength"], "moderate")  # strongest first
-        self.assertIn("Demand themes, strongest first:", brief.text)
+        self.assertIn("headline", brief.data)
+        self.assertIn("Demand themes, strongest market opportunity first:", brief.text)
+        self.assertIn("Strategic implications:", brief.text)
         self.assertIn("Season view:", brief.text)
         stages.decide_brief(brief, "approve")
         cycle.refresh_from_db()
         stages.run_stage2(cycle, client=ScriptedClient())
         prompt = ModelCall.objects.get(cycle=cycle, step="plan_concepts").prompt
-        self.assertIn("Chunky hand-knit accessories [evidence: moderate", prompt)
+        self.assertIn("Structured suede shoulder bags (bags) [evidence: weak", prompt)
 
     def test_brief_may_only_cite_sources_from_the_findings(self):
         good_url = dryrun.sample_source_urls()[0]
@@ -322,6 +332,36 @@ class ResearchTests(TestCase):
     def test_brief_with_an_unknown_strength_is_rejected(self):
         data = json.loads(self._brief_citing(dryrun.sample_source_urls()[0]))
         data["themes"][0]["strength"] = "very strong"
+        with self.assertRaises(schemas.SchemaError):
+            schemas.validate_brief(data, None)
+
+    def test_figures_not_quoted_in_the_evidence_are_dropped(self):
+        data = json.loads(dryrun.respond("research_trends", ""))
+        data["findings"][0]["figures"].append({"label": "invented", "value": 91, "unit": "%", "period": ""})
+        data["findings"][2]["forecast"]["value"] = 99
+        cycle = Cycle.objects.create(name="Figures")
+        stages.run_stage1(cycle, client=ScriptedClient({"research_trends": [json.dumps(data)]}))
+        first = cycle.findings.get(theme="Chunky hand-knit accessories")
+        self.assertEqual([f["value"] for f in first.figures], [38.0])
+        bags = cycle.findings.get(theme="Structured suede shoulder bags")
+        self.assertIsNone(bags.forecast["value"])
+        self.assertTrue(bags.forecast["statement"])
+
+    def test_research_covers_the_whole_market_not_only_the_brand_techniques(self):
+        cycle = Cycle.objects.create(name="Scope")
+        stages.run_stage1(cycle, client=ScriptedClient())
+        prompt = ModelCall.objects.get(cycle=cycle, step="research_trends").prompt
+        self.assertIn("the whole fashion market", prompt)
+        self.assertNotIn("neighbouring categories a small craft-led label could credibly make", prompt)
+        self.assertEqual(cycle.findings.filter(malina_fit="outside").count(), 1)
+
+    def test_history_must_match_the_timeline_periods(self):
+        data = json.loads(self._brief_citing(dryrun.sample_source_urls()[0]))
+        data["themes"][0]["history"] = data["themes"][0]["history"][:2]
+        with self.assertRaises(schemas.SchemaError):
+            schemas.validate_brief(data, None)
+        data = json.loads(self._brief_citing(dryrun.sample_source_urls()[0]))
+        data["themes"][0]["attractiveness"] = 7
         with self.assertRaises(schemas.SchemaError):
             schemas.validate_brief(data, None)
 
@@ -606,9 +646,12 @@ class ScreenTests(TestCase):
         cycle = Cycle.objects.create(name="No input")
         self.client.post(reverse("run_stage1", args=[cycle.pk]))
         page = self.client.get(reverse("cycle_detail", args=[cycle.pk]))
-        self.assertContains(page, "Demand themes, strongest first")
-        self.assertContains(page, "Season view")
-        self.assertContains(page, "Sources behind the brief")
+        self.assertContains(page, "Where to play")
+        self.assertContains(page, "How demand has moved")
+        self.assertContains(page, "Published forecasts")
+        self.assertContains(page, "Beyond Malina")
+        self.assertContains(page, "What to do")
+        self.assertContains(page, "Sources behind the report")
         self.assertContains(page, "Gate 1: your decision")
 
     def test_season_is_saved_and_bad_values_are_refused(self):
@@ -664,6 +707,25 @@ class ScreenTests(TestCase):
         self.client.post(reverse("save_direction", args=[cycle.pk]), {"direction": "Changed"})
         cycle.refresh_from_db()
         self.assertEqual(cycle.direction, "Hats and gloves")
+
+    def test_dashboard_numbers_come_only_from_quoted_figures(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="Dashboard")
+        stages.run_stage1(cycle, client=DryRunClient())
+        page = self.client.get(reverse("cycle_detail", args=[cycle.pk])).content.decode()
+        for value in ("+64%", "+38%", "+22%", "-12%"):
+            self.assertIn(value, page)
+        self.assertIn('class="matrix"', page)
+        self.assertIn("by 2027", page)
+
+    def test_dashboard_escapes_theme_names(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="Escape")
+        brief = stages.run_stage1(cycle, client=DryRunClient())
+        brief.data["themes"][0]["name"] = "<script>alert(1)</script>"
+        brief.save()
+        page = self.client.get(reverse("cycle_detail", args=[cycle.pk])).content.decode()
+        self.assertNotIn("<script>alert(1)</script>", page)
 
     def test_older_text_only_brief_still_displays(self):
         self.client.force_login(self.user)

@@ -54,21 +54,36 @@ def _direction(cycle: Cycle) -> str:
     return cycle.direction.strip() or "None given."
 
 
+def _words(value) -> str:
+    return str(value).replace("_", " ")
+
+
 def brief_as_text(data: dict) -> str:
-    """The structured brief as plain text, for the designer step and for the record."""
-    lines = [f"Season: {data['season']}", "", data["summary"], "", "Demand themes, strongest first:"]
+    """The market report as plain text, for the designer step and for the record."""
+    lines = [f"Season: {data['season']}", "", f"Headline: {data['headline']}", "", "Key takeaways:"]
+    for takeaway in data["key_takeaways"]:
+        lines.append(f"- {takeaway['headline']} So what: {takeaway['so_what']}")
+    lines += ["", "Demand themes, strongest market opportunity first:"]
     for i, theme in enumerate(data["themes"], 1):
-        basis = ", ".join(b.replace("_", " ") for b in theme["basis"])
+        basis = ", ".join(_words(b) for b in theme["basis"])
+        history = ", ".join(f"{h['period']}: {h['level']}" for h in theme["history"])
         lines.append(
-            f"{i}. {theme['name']} [evidence: {theme['strength']}; time frame: "
-            f"{theme['timeframe'].replace('_', ' ')}; rests on: {basis}]"
+            f"{i}. {theme['name']} ({_words(theme['category'])}) [evidence: {theme['strength']}; "
+            f"momentum: {theme['momentum']}; time frame: {_words(theme['timeframe'])}; "
+            f"market attractiveness {theme['attractiveness']}/5; fit with Malina {theme['fit']}/5; rests on: {basis}]"
         )
         lines.append(f"   {theme['what_people_want']}")
         lines.append(f"   Why this rating: {theme['strength_reason']}")
+        lines.append(f"   How Malina could make it: {theme['fit_note']}")
+        lines.append(f"   Over time: {history}. Outlook: {theme['outlook']['level']} ({theme['outlook']['reason']})")
         if theme.get("audience_signals"):
             lines.append(f"   Audience signals: {theme['audience_signals']}")
         for source in theme["sources"]:
             lines.append(f"   Source: {source['title']} ({source['url']})")
+    if data["market_shifts"]:
+        lines += ["", "Market shifts:"] + [
+            f"- From {m['from']} to {m['to']}. {m['evidence']}" for m in data["market_shifts"]
+        ]
     view = data["season_view"]
     lines += [
         "",
@@ -76,16 +91,21 @@ def brief_as_text(data: dict) -> str:
         f"- Returns every year: {'; '.join(view['returns_every_year']) or 'nothing found'}",
         f"- New this year: {'; '.join(view['new_this_year']) or 'nothing found'}",
         f"- Fading, avoid: {'; '.join(view['fading']) or 'nothing found'}",
+    ]
+    if data["beyond_current_range"]:
+        lines += ["", "Opportunities beyond Malina's current range:"] + [
+            f"- {o['opportunity']}. Why: {o['why']} Route: {o['route']}" for o in data["beyond_current_range"]
+        ]
+    lines += ["", "Strategic implications:"] + [f"- {i['title']}: {i['action']}" for i in data["implications"]]
+    lines += [
         "",
-        f"Founder's direction: {data['direction']['verdict'].replace('_', ' ')}."
+        f"Founder's direction: {_words(data['direction']['verdict'])}."
         + (f" {data['direction']['explanation']}" if data["direction"].get("explanation") else ""),
         "",
         f"Earlier price tests: {data['past_tests']}",
     ]
     if data["gaps"]:
         lines += ["", "Gaps:"] + [f"- {gap}" for gap in data["gaps"]]
-    if data["conflicts"]:
-        lines += ["", "Conflicts with the brand brief:"] + [f"- {c}" for c in data["conflicts"]]
     return "\n".join(lines)
 
 
@@ -110,7 +130,7 @@ def run_research(cycle: Cycle, brand_brief: str, client) -> list:
         today=timezone.localdate().isoformat(),
     )
     result = run_result(
-        cycle, "research_trends", prompt, settings.FDW_MODEL_WRITER, 8000, client,
+        cycle, "research_trends", prompt, settings.FDW_MODEL_WRITER, 14000, client,
         web_search_max=settings.FDW_RESEARCH_MAX_SEARCHES,
     )
     try:
@@ -122,7 +142,7 @@ def run_research(cycle: Cycle, brand_brief: str, client) -> list:
             problems="\n".join(f"- {problem}" for problem in first.problems[:20]),
             previous_answer=result.text,
         )
-        text = run_call(cycle, "reformat_findings", reformat_prompt, settings.FDW_MODEL_WRITER, 8000, client)
+        text = run_call(cycle, "reformat_findings", reformat_prompt, settings.FDW_MODEL_WRITER, 14000, client)
         try:
             data = schemas.validate_findings(parse_json(text))
         except schemas.SchemaError as second:
@@ -135,6 +155,8 @@ def run_research(cycle: Cycle, brand_brief: str, client) -> list:
     for item in data["findings"]:
         finding = dict(item)
         finding["verified"] = schemas.normalise_url(finding["source_url"]) in known
+        finding["figures"] = schemas.supported_figures(item)
+        finding["forecast"] = schemas.supported_forecast(item)
         findings.append(finding)
     return findings
 
@@ -193,7 +215,7 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
     )
     allowed_urls = {schemas.normalise_url(f["source_url"]) for f in verified}
     brief_data = run_json(
-        cycle, "demand_brief", brief_prompt, settings.FDW_MODEL_WRITER, 5000,
+        cycle, "demand_brief", brief_prompt, settings.FDW_MODEL_WRITER, 9000,
         lambda data: schemas.validate_brief(data, allowed_urls), client,
     )
     brief_text = brief_as_text(brief_data)
@@ -227,6 +249,11 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
                 relevance=str(f.get("relevance") or ""),
                 timeframe=f["timeframe"],
                 seasons_observed=str(f.get("seasons_observed") or "")[:200],
+                category=f["category"],
+                momentum=f["momentum"],
+                malina_fit=f["malina_fit"],
+                figures=f["figures"],
+                forecast=f["forecast"],
                 verified=f["verified"],
             )
             for f in findings
