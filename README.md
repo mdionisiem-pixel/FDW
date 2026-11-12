@@ -1,14 +1,14 @@
 # FDW: Malina design-to-launch workflow
 
-A Django application that turns what Malina's audience asks for into collection
-concepts you can choose between. You approve every step.
+A Django application that researches what people are buying now and designs new
+collections from it. You approve every step.
 
 This is **slice 1** of the specification. It covers the first two of seven stages:
 
 | Stage | Status | What it does |
 | --- | --- | --- |
-| 1. Demand signals | Built | Extracts signals from pasted messages and writes a demand brief |
-| 2. Collection concepts | Built | Designs three collections, reviews each one separately, you pick one or two |
+| 1. Market research | Built | Searches the web for current demand, checks every source, and writes a research brief. Nothing needs to be typed; a direction and audience messages are optional |
+| 2. Collection concepts | Built | Designs three new collections from the brief, reviews each one separately, you pick one or two |
 | 3. Sourcing check | Not built | Slice 2 |
 | 4. Visual prototypes | Not built | Slice 2 |
 | 5. 3D generation | Not built | Slice 3 |
@@ -58,15 +58,24 @@ FDW_DRY_RUN=0
 ANTHROPIC_API_KEY=your-key
 ```
 
-The live model path has automated tests around it (validation, retries, spend limit)
-but has not yet been run against the real API. Run one small cycle first and check
+The live model path has automated tests around it (validation, retries, spend limit,
+search handling) but has not yet been run against the real API. Web search must be
+enabled for your organisation in the Claude Console, which it is by default, and it
+is not confirmed here that the configured model supports it; if it does not, stage 1
+shows the API's error and saves nothing. Run one small cycle first and check
 the "Model calls" record on the cycle page.
 
 ## Guardrails
 
 These are enforced in code, not by prompts.
 
-- **Gates.** Stage 2 refuses to run without an approved demand brief. A brief can be
+- **Sources.** A research finding reaches the brief only if its link is one the web
+  search actually returned in that run. This is checked in code. Findings that fail
+  are shown as left out.
+- **Search cap.** One research run makes at most `FDW_RESEARCH_MAX_SEARCHES` searches
+  (default 8). Searches are priced at `FDW_SEARCH_PRICE_USD` each and counted in the
+  cycle's spend.
+- **Gates.** Stage 2 refuses to run without an approved research brief. A brief can be
   decided once. Concept selection accepts one or two concepts from the same cycle.
 - **Spend limit.** Every model call is recorded with its cost. Before each call the
   cycle's spend is checked against `FDW_CYCLE_LIMIT_USD` (default $5); at the limit,
@@ -79,8 +88,8 @@ These are enforced in code, not by prompts.
 - **Production tiers.** A hand technique cannot be assigned to an on-demand machine
   supplier, and only atelier pieces may be described as handmade. Both are checked in
   code as well as by the reviewer.
-- **Untrusted input.** Pasted messages are treated as data. The extraction step has
-  no tools, and prompt slots are filled in one pass so text inside a message cannot
+- **Untrusted input.** Web pages and pasted messages are treated as data. The research
+  step can search the web and do nothing else; the extraction step has no tools, and prompt slots are filled in one pass so text inside a message cannot
   act as a slot.
 - **Sign-in.** Every screen requires a signed-in user.
 
@@ -121,7 +130,7 @@ Each is deliberate and replaced in a later slice without changing the stage logi
 - SQLite database.
 - Model calls run inside the web request, so a stage can take a minute or two while
   the page waits. A background job queue comes with slice 4.
-- Signals are pasted by hand. Automated intake comes later.
+- Audience messages, when used, are pasted by hand. Automated intake comes later.
 - Models and prices are set in `fdw/settings.py` (`FDW_PRICES`). Update them when
   prices change; a model without a price is refused so spend is never untracked.
 

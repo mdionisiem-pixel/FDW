@@ -5,7 +5,7 @@ any output can be traced to the prompt that produced it, and the spend limit
 is checked against real recorded cost before each call.
 """
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from django.conf import settings
@@ -13,6 +13,8 @@ from django.conf import settings
 from . import dryrun
 from .models import ModelCall
 from .schemas import SchemaError
+
+MAX_PAUSE_CONTINUATIONS = 4
 
 
 class StageError(Exception):
@@ -28,10 +30,15 @@ class LLMResult:
     text: str
     input_tokens: int
     output_tokens: int
+    web_searches: int = 0
+    # URLs the search tool actually returned. Findings are checked against these.
+    source_urls: list = field(default_factory=list)
 
 
 class AnthropicClient:
     """Thin wrapper over the Anthropic Messages API."""
+
+    dry_run = False
 
     def __init__(self):
         if not settings.ANTHROPIC_API_KEY:
@@ -45,27 +52,62 @@ class AnthropicClient:
         self._client = anthropic.Anthropic(
             api_key=settings.ANTHROPIC_API_KEY, max_retries=3, timeout=600.0
         )
-        self.dry_run = False
 
-    def complete(self, step: str, prompt: str, model: str, max_tokens: int) -> LLMResult:
-        try:
-            # Streaming avoids HTTP timeouts on long responses such as three
-            # full collection concepts.
-            with self._client.messages.stream(
-                model=model,
-                max_tokens=max_tokens,
-                messages=[{"role": "user", "content": prompt}],
-            ) as stream:
-                message = stream.get_final_message()
-        except self._anthropic.APIError as exc:
-            raise StageError(f"The model call for '{step}' failed: {exc}") from exc
-        text = "".join(block.text for block in message.content if block.type == "text")
-        if message.stop_reason == "max_tokens":
-            raise StageError(
-                f"The model's answer for '{step}' was cut off at {max_tokens} tokens. "
-                "Nothing was saved."
-            )
-        return LLMResult(text, message.usage.input_tokens, message.usage.output_tokens)
+    def complete(self, step: str, prompt: str, model: str, max_tokens: int,
+                 web_search_max: int = 0) -> LLMResult:
+        """Run one request. With ``web_search_max`` above zero the model may search the web.
+
+        Web search is the only tool ever offered, and only to the research
+        step, so text found on a web page has nothing else it could trigger.
+        """
+        kwargs = {"model": model, "max_tokens": max_tokens}
+        if web_search_max > 0:
+            kwargs["tools"] = [{
+                "type": settings.FDW_WEB_SEARCH_TOOL,
+                "name": "web_search",
+                "max_uses": web_search_max,
+            }]
+        messages = [{"role": "user", "content": prompt}]
+        result = LLMResult("", 0, 0)
+        for _ in range(MAX_PAUSE_CONTINUATIONS + 1):
+            try:
+                # Streaming avoids HTTP timeouts on long responses.
+                with self._client.messages.stream(messages=messages, **kwargs) as stream:
+                    message = stream.get_final_message()
+            except self._anthropic.APIError as exc:
+                raise StageError(f"The model call for '{step}' failed: {exc}") from exc
+            self._collect(message, result)
+            if message.stop_reason == "pause_turn":
+                # A long search turn was paused. Send the assistant turn back
+                # unchanged so the model continues where it stopped.
+                messages = messages + [{"role": "assistant", "content": message.content}]
+                continue
+            if message.stop_reason == "max_tokens":
+                raise StageError(
+                    f"The model's answer for '{step}' was cut off at {max_tokens} tokens. "
+                    "Nothing was saved."
+                )
+            return result
+        raise StageError(f"The model call for '{step}' paused too many times. Nothing was saved.")
+
+    @staticmethod
+    def _collect(message, result: LLMResult) -> None:
+        for block in message.content:
+            block_type = getattr(block, "type", "")
+            if block_type == "text":
+                result.text += block.text
+            elif block_type == "web_search_tool_result":
+                content = getattr(block, "content", None)
+                if isinstance(content, list):
+                    for item in content:
+                        url = getattr(item, "url", None)
+                        if url:
+                            result.source_urls.append(url)
+        usage = message.usage
+        result.input_tokens += getattr(usage, "input_tokens", 0) or 0
+        result.output_tokens += getattr(usage, "output_tokens", 0) or 0
+        server_tools = getattr(usage, "server_tool_use", None)
+        result.web_searches += getattr(server_tools, "web_search_requests", 0) or 0
 
 
 class DryRunClient:
@@ -73,16 +115,19 @@ class DryRunClient:
 
     dry_run = True
 
-    def complete(self, step: str, prompt: str, model: str, max_tokens: int) -> LLMResult:
+    def complete(self, step: str, prompt: str, model: str, max_tokens: int,
+                 web_search_max: int = 0) -> LLMResult:
         text = dryrun.respond(step, prompt)
-        return LLMResult(text, len(prompt) // 4, len(text) // 4)
+        urls = dryrun.sample_source_urls() if web_search_max > 0 else []
+        return LLMResult(text, len(prompt) // 4, len(text) // 4,
+                         web_searches=3 if web_search_max > 0 else 0, source_urls=urls)
 
 
 def get_client():
     return DryRunClient() if settings.FDW_DRY_RUN else AnthropicClient()
 
 
-def cost_of(model: str, input_tokens: int, output_tokens: int) -> Decimal:
+def cost_of(model: str, input_tokens: int, output_tokens: int, web_searches: int = 0) -> Decimal:
     prices = settings.FDW_PRICES.get(model)
     if prices is None:
         raise StageError(
@@ -91,7 +136,11 @@ def cost_of(model: str, input_tokens: int, output_tokens: int) -> Decimal:
         )
     price_in, price_out = prices
     million = Decimal("1000000")
-    cost = Decimal(input_tokens) / million * price_in + Decimal(output_tokens) / million * price_out
+    cost = (
+        Decimal(input_tokens) / million * price_in
+        + Decimal(output_tokens) / million * price_out
+        + Decimal(web_searches) * settings.FDW_SEARCH_PRICE_USD
+    )
     return cost.quantize(Decimal("0.0001"))
 
 
@@ -105,20 +154,22 @@ def check_spend(cycle) -> None:
         )
 
 
-def run_call(cycle, step: str, prompt: str, model: str, max_tokens: int, client) -> str:
-    """Make one model call for a cycle and record it."""
+def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, client,
+               web_search_max: int = 0) -> LLMResult:
+    """Make one model call for a cycle, record it, and return the full result."""
     check_spend(cycle)
-    if model not in settings.FDW_PRICES:
-        cost_of(model, 0, 0)  # raises a clear error before any money is spent
+    cost_of(model, 0, 0)  # raises a clear error for an unpriced model before any money is spent
+    is_dry = getattr(client, "dry_run", False)
     try:
-        result = client.complete(step, prompt, model, max_tokens)
+        if web_search_max > 0:
+            result = client.complete(step, prompt, model, max_tokens, web_search_max=web_search_max)
+        else:
+            result = client.complete(step, prompt, model, max_tokens)
     except StageError as exc:
         ModelCall.objects.create(
-            cycle=cycle, step=step, model=model, prompt=prompt, ok=False, error=str(exc),
-            dry_run=getattr(client, "dry_run", False),
+            cycle=cycle, step=step, model=model, prompt=prompt, ok=False, error=str(exc), dry_run=is_dry,
         )
         raise
-    is_dry = getattr(client, "dry_run", False)
     ModelCall.objects.create(
         cycle=cycle,
         step=step,
@@ -127,10 +178,18 @@ def run_call(cycle, step: str, prompt: str, model: str, max_tokens: int, client)
         response=result.text,
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
-        cost_usd=Decimal("0") if is_dry else cost_of(model, result.input_tokens, result.output_tokens),
+        web_searches=result.web_searches,
+        cost_usd=Decimal("0") if is_dry else cost_of(
+            model, result.input_tokens, result.output_tokens, result.web_searches
+        ),
         dry_run=is_dry,
     )
-    return result.text
+    return result
+
+
+def run_call(cycle, step: str, prompt: str, model: str, max_tokens: int, client) -> str:
+    """Make one model call for a cycle and return its text."""
+    return run_result(cycle, step, prompt, model, max_tokens, client).text
 
 
 def parse_json(text: str):

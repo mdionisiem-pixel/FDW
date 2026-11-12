@@ -1,4 +1,4 @@
-"""Screens for running a cycle: paste signals, review the brief, pick a collection."""
+"""Screens for running a cycle: research the market, review the brief, pick a collection."""
 from collections import Counter
 
 from django.conf import settings
@@ -13,8 +13,8 @@ from .models import BrandBrief, Concept, Cycle, DemandBrief, RawItem
 from .schemas import REVIEW_CRITERIA
 
 STAGES = [
-    (1, "Demand signals", "What people ask for, with the evidence"),
-    (2, "Collection concepts", "Three directions, reviewed, you pick"),
+    (1, "Market research", "What people want now, with sources"),
+    (2, "Collection concepts", "Three new collections, reviewed, you pick"),
     (3, "Sourcing check", "Can each piece be made, at what cost"),
     (4, "Visual prototypes", "Five photoreal shots per piece"),
     (5, "3D generation", "A rotating model of each piece"),
@@ -102,7 +102,7 @@ def create_cycle(request):
         messages.error(request, "Give the cycle a name, such as \"Winter 2026\".")
         return redirect("dashboard")
     cycle = Cycle.objects.create(name=name[:120])
-    messages.success(request, f"Created {cycle.name}. Add what your audience has been asking for.")
+    messages.success(request, f"Created {cycle.name}. Start with market research.")
     return redirect("cycle_detail", pk=cycle.pk)
 
 
@@ -145,6 +145,7 @@ def cycle_detail(request, pk):
         "raw_items": raw_items,
         "source_counts": Counter(i.get_source_display() for i in raw_items).most_common(),
         "sources": RawItem.Source.choices,
+        "findings": list(cycle.findings.all()),
         "signals": signals,
         "intent_counts": {
             "purchase": intent_counts.get("purchase", 0),
@@ -173,7 +174,7 @@ def cycle_detail(request, pk):
 def add_items(request, pk):
     cycle = get_object_or_404(Cycle, pk=pk)
     if cycle.status not in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
-        messages.error(request, "Signals are locked once a demand brief has been written from them.")
+        messages.error(request, "Inputs are locked once a research brief has been written from them.")
         return redirect("cycle_detail", pk=pk)
     source = request.POST.get("source", RawItem.Source.DM)
     if source not in RawItem.Source.values:
@@ -194,7 +195,20 @@ def delete_item(request, pk, item_pk):
     if cycle.status in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
         RawItem.objects.filter(cycle=cycle, pk=item_pk).delete()
     else:
-        messages.error(request, "Signals are locked once a demand brief has been written from them.")
+        messages.error(request, "Inputs are locked once a research brief has been written from them.")
+    return redirect("cycle_detail", pk=pk)
+
+
+@login_required
+@require_POST
+def save_direction(request, pk):
+    cycle = get_object_or_404(Cycle, pk=pk)
+    if cycle.status not in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
+        messages.error(request, "The direction is locked once a research brief has been written from it.")
+        return redirect("cycle_detail", pk=pk)
+    cycle.direction = request.POST.get("direction", "").strip()[:4000]
+    cycle.save(update_fields=["direction"])
+    messages.success(request, "Direction saved." if cycle.direction else "Direction cleared.")
     return redirect("cycle_detail", pk=pk)
 
 
@@ -204,7 +218,7 @@ def run_stage1(request, pk):
     cycle = get_object_or_404(Cycle, pk=pk)
     try:
         stages.run_stage1(cycle)
-        messages.success(request, "Demand brief written. Read it and decide below.")
+        messages.success(request, "Research finished and brief written. Read it and decide below.")
     except StageError as exc:
         messages.error(request, str(exc))
     return redirect("cycle_detail", pk=pk)
@@ -216,7 +230,7 @@ def decide_brief(request, pk):
     cycle = get_object_or_404(Cycle, pk=pk)
     brief = cycle.latest_brief
     if brief is None:
-        messages.error(request, "There is no demand brief to decide on yet.")
+        messages.error(request, "There is no research brief to decide on yet.")
         return redirect("cycle_detail", pk=pk)
     try:
         stages.decide_brief(
@@ -226,9 +240,9 @@ def decide_brief(request, pk):
             request.user.get_username(),
         )
         if brief.status == DemandBrief.Status.APPROVED:
-            messages.success(request, "Demand brief approved. Stage 2 is unlocked.")
+            messages.success(request, "Research brief approved. Stage 2 is unlocked.")
         else:
-            messages.success(request, "Demand brief rejected. Adjust the signals and run stage 1 again.")
+            messages.success(request, "Research brief rejected. Adjust the direction and run the research again.")
     except StageError as exc:
         messages.error(request, str(exc))
     return redirect("cycle_detail", pk=pk)
@@ -240,7 +254,7 @@ def run_stage2(request, pk):
     cycle = get_object_or_404(Cycle, pk=pk)
     try:
         stages.run_stage2(cycle)
-        messages.success(request, "Three concepts designed and reviewed. Pick one or two below.")
+        messages.success(request, "Three new collections designed and reviewed. Pick one or two below.")
     except StageError as exc:
         messages.error(request, str(exc))
     return redirect("cycle_detail", pk=pk)

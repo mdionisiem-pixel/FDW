@@ -16,6 +16,7 @@ from .models import (
     Piece,
     RawItem,
     Signal,
+    TrendFinding,
 )
 
 
@@ -57,6 +58,12 @@ class SignalAdmin(ReadOnlyAdmin):
     list_filter = ("intent", "source", "cycle")
 
 
+@admin.register(TrendFinding)
+class TrendFindingAdmin(ReadOnlyAdmin):
+    list_display = ("theme", "cycle", "source_title", "source_date", "verified")
+    list_filter = ("verified", "cycle")
+
+
 @admin.register(DemandBrief)
 class DemandBriefAdmin(ReadOnlyAdmin):
     list_display = ("cycle", "status", "created_at", "decided_at")
@@ -86,5 +93,5 @@ class ApprovalAdmin(ReadOnlyAdmin):
 
 @admin.register(ModelCall)
 class ModelCallAdmin(ReadOnlyAdmin):
-    list_display = ("step", "cycle", "model", "input_tokens", "output_tokens", "cost_usd", "ok", "dry_run", "created_at")
+    list_display = ("step", "cycle", "model", "input_tokens", "output_tokens", "web_searches", "cost_usd", "ok", "dry_run", "created_at")
     list_filter = ("step", "ok", "dry_run", "cycle")

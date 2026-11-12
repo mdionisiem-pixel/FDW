@@ -1,4 +1,4 @@
-"""Stage logic and approval gates for slice 1.
+"""Stage logic and approval gates for stages 1 and 2.
 
 The order of work is fixed in code. A stage refuses to run unless the gate
 before it has an explicit approval, so nothing depends on a model choosing to
@@ -13,7 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import prompts, schemas
-from .llm import StageError, get_client, run_call, run_json
+from .llm import StageError, get_client, parse_json, run_call, run_json, run_result
 from .models import (
     Approval,
     BrandBrief,
@@ -23,6 +23,7 @@ from .models import (
     DemandBrief,
     Piece,
     Signal,
+    TrendFinding,
 )
 
 MAX_CONCEPT_REVISIONS = 1
@@ -46,23 +47,72 @@ def _clean_attributes(value):
     return [str(v) for v in value]
 
 
-# --- Stage 1: demand signals -------------------------------------------------
+# --- Stage 1: market research -------------------------------------------------
+
+
+def _direction(cycle: Cycle) -> str:
+    return cycle.direction.strip() or "None given."
+
+
+def run_research(cycle: Cycle, brand_brief: str, client) -> list:
+    """Search the web for current demand and return findings, each marked verified or not.
+
+    A finding is verified only when its URL is one the search tool actually
+    returned in this run. This is checked in code, so a source the model
+    invented or altered can never reach the brief.
+    """
+    prompt = prompts.render(
+        prompts.RESEARCH_TRENDS,
+        brand_brief=brand_brief,
+        founder_direction=_direction(cycle),
+        today=timezone.localdate().isoformat(),
+    )
+    result = run_result(
+        cycle, "research_trends", prompt, settings.FDW_MODEL_WRITER, 8000, client,
+        web_search_max=settings.FDW_RESEARCH_MAX_SEARCHES,
+    )
+    try:
+        data = schemas.validate_findings(parse_json(result.text))
+    except schemas.SchemaError as first:
+        # Reformat without searching again, so a formatting slip does not cost more searches.
+        reformat_prompt = prompts.render(
+            prompts.REFORMAT_FINDINGS,
+            problems="\n".join(f"- {problem}" for problem in first.problems[:20]),
+            previous_answer=result.text,
+        )
+        text = run_call(cycle, "reformat_findings", reformat_prompt, settings.FDW_MODEL_WRITER, 8000, client)
+        try:
+            data = schemas.validate_findings(parse_json(text))
+        except schemas.SchemaError as second:
+            raise StageError(
+                "The research output was invalid twice, so nothing was saved. "
+                f"First problems: {'; '.join(second.problems[:5])}"
+            ) from second
+    known = {schemas.normalise_url(url) for url in result.source_urls}
+    findings = []
+    for item in data["findings"]:
+        finding = dict(item)
+        finding["verified"] = schemas.normalise_url(finding["source_url"]) in known
+        findings.append(finding)
+    return findings
 
 
 def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
-    """Extract signals from the cycle's raw items and write the demand brief."""
+    """Research the market and write the research brief.
+
+    Nothing needs to be typed in. Audience messages and the founder's
+    direction are optional extra inputs.
+    """
     if cycle.status not in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
         raise GateError(
-            "Stage 1 has already produced a demand brief for this cycle. "
+            "Stage 1 has already produced a research brief for this cycle. "
             "Decide on that brief before running the stage again."
         )
-    raw_items = list(cycle.raw_items.all())
-    if not raw_items:
-        raise StageError("Add at least one message, comment or trend line before running stage 1.")
     client = client or get_client()
     brand_brief = BrandBrief.current().text
 
     extracted = []
+    raw_items = list(cycle.raw_items.all())
     offset = 0
     for batch in _chunks(raw_items, settings.FDW_EXTRACT_BATCH_SIZE):
         lines = [
@@ -77,12 +127,24 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
                 8000, schemas.validate_signals, client,
             )
         )
-    if not extracted:
-        raise StageError("No signals could be extracted from the items. Nothing was saved.")
+
+    findings = run_research(cycle, brand_brief, client)
+    verified = [f for f in findings if f["verified"]]
+    if not verified and not extracted and not cycle.direction.strip():
+        raise StageError(
+            "The research returned no findings with a confirmed source, and there is no "
+            "direction or audience signal to work from. Nothing was saved. Run it again, "
+            "or add a direction first."
+        )
 
     brief_prompt = prompts.render(
         prompts.DEMAND_BRIEF,
         brand_brief=brand_brief,
+        founder_direction=_direction(cycle),
+        findings_json=json.dumps(
+            [{k: v for k, v in f.items() if k != "verified"} for f in verified],
+            ensure_ascii=False,
+        ),
         signals_json=json.dumps(extracted, ensure_ascii=False),
         past_test_results=NO_PAST_RESULTS,
     )
@@ -90,10 +152,11 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
         cycle, "demand_brief", brief_prompt, settings.FDW_MODEL_WRITER, 4000, client
     ).strip()
     if not brief_text:
-        raise StageError("The model returned an empty demand brief. Nothing was saved.")
+        raise StageError("The model returned an empty research brief. Nothing was saved.")
 
     with transaction.atomic():
         cycle.signals.all().delete()
+        cycle.findings.all().delete()
         Signal.objects.bulk_create(
             Signal(
                 cycle=cycle,
@@ -108,6 +171,20 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
             )
             for s in extracted
         )
+        TrendFinding.objects.bulk_create(
+            TrendFinding(
+                cycle=cycle,
+                theme=str(f["theme"])[:200],
+                what_people_want=str(f["what_people_want"]),
+                evidence=str(f["evidence"]),
+                source_title=str(f.get("source_title") or "")[:300],
+                source_url=str(f["source_url"])[:1000],
+                source_date=str(f.get("source_date") or "")[:20],
+                relevance=str(f.get("relevance") or ""),
+                verified=f["verified"],
+            )
+            for f in findings
+        )
         brief = DemandBrief.objects.create(cycle=cycle, text=brief_text)
         cycle.status = Cycle.Status.BRIEF_PENDING
         cycle.save(update_fields=["status"])
@@ -115,11 +192,11 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
 
 
 def decide_brief(brief: DemandBrief, decision: str, notes: str = "", user: str = "") -> DemandBrief:
-    """Gate 1. Record the founder's decision on the demand brief."""
+    """Gate 1. Record the founder's decision on the research brief."""
     if decision not in ("approve", "reject"):
         raise StageError("The decision must be approve or reject.")
     if brief.status != DemandBrief.Status.PENDING:
-        raise GateError("This demand brief has already been decided.")
+        raise GateError("This research brief has already been decided.")
     if decision == "reject" and not notes.strip():
         raise StageError("Give a reason when rejecting, so the next run can take it into account.")
     cycle = brief.cycle
@@ -135,7 +212,7 @@ def decide_brief(brief: DemandBrief, decision: str, notes: str = "", user: str =
         )
         cycle.save(update_fields=["status"])
         Approval.objects.create(
-            cycle=cycle, stage=1, item=f"Demand brief #{brief.pk}",
+            cycle=cycle, stage=1, item=f"Research brief #{brief.pk}",
             decision="approved" if decision == "approve" else "rejected",
             notes=notes.strip(), decided_by=user,
         )
@@ -170,7 +247,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
     brief = cycle.approved_brief
     if cycle.status != Cycle.Status.BRIEF_APPROVED or brief is None:
         raise GateError(
-            "Stage 2 needs an approved demand brief. Approve the brief at gate 1 first."
+            "Stage 2 needs an approved research brief. Approve the brief at gate 1 first."
         )
     client = client or get_client()
     brand_brief = BrandBrief.current().text
@@ -179,6 +256,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
         prompts.GENERATE_CONCEPTS,
         brand_brief=brand_brief,
         approved_demand_brief=brief.text,
+        founder_direction=_direction(cycle),
         gate1_notes=brief.founder_notes or "No notes.",
         past_test_results=NO_PAST_RESULTS,
     )
