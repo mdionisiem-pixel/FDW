@@ -1,0 +1,83 @@
+{% extends "workflow/base.html" %}
+{% block title %}Image test | Malina studio{% endblock %}
+{% block content %}
+<section class="page">
+  <div class="page-head">
+    <div>
+      <h1>Image model test</h1>
+      <p class="lede">Photograph pieces you have already made. Each image model draws them from the same description, and you score the results without knowing which model made which. The best match becomes the model for product prototypes.</p>
+    </div>
+    <div class="spend" aria-label="Bake-off spend">
+      <p class="spend-figure">${{ spent|floatformat:2 }} <span>of ${{ limit|floatformat:2 }} limit</span></p>
+      <p class="meta">Generation stops at the limit.</p>
+    </div>
+  </div>
+
+  <ol class="steps-strip">
+    <li><strong>Add a piece</strong> with photos</li>
+    <li><strong>Claude describes it</strong> and writes the prompts</li>
+    <li><strong>Each model draws</strong> three shots</li>
+    <li><strong>You score</strong> blind</li>
+    <li><strong>Results</strong> pick the model</li>
+  </ol>
+
+  <div class="bake-grid">
+    <form class="stage bake-new" method="post" action="{% url 'bakeoff_create' %}" enctype="multipart/form-data">
+      {% csrf_token %}
+      <h2>Add a piece</h2>
+      <p class="stage-intro">Use a piece with clear detail, such as embroidery or visible stitches. Two or three pieces give a fair result.</p>
+      <label for="piece-name">Name</label>
+      <input id="piece-name" type="text" name="name" maxlength="120" placeholder="Rosehip cardigan" required>
+      <div class="photo-inputs">
+        <div class="field"><label for="photo_front">Front photo, required</label><input id="photo_front" type="file" name="photo_front" accept="image/jpeg,image/png,image/webp" required></div>
+        <div class="field"><label for="photo_back">Back</label><input id="photo_back" type="file" name="photo_back" accept="image/jpeg,image/png,image/webp"></div>
+        <div class="field"><label for="photo_detail">Detail close-up</label><input id="photo_detail" type="file" name="photo_detail" accept="image/jpeg,image/png,image/webp"></div>
+        <div class="field"><label for="photo_worn">Worn</label><input id="photo_worn" type="file" name="photo_worn" accept="image/jpeg,image/png,image/webp"></div>
+      </div>
+      <p class="meta">JPEG, PNG or WebP, up to 5 MB each. Without a detail or worn photo, that shot is left out for this piece.</p>
+      <label for="piece-notes">Facts the photos do not show, optional</label>
+      <textarea id="piece-notes" name="notes" rows="2" placeholder="For example: 100% merino, hand-knit, size M, chest 52 cm."></textarea>
+      <button class="btn btn-primary" type="submit">Add piece</button>
+    </form>
+
+    <section class="stage bake-models">
+      <h2>Models being compared</h2>
+      <ul class="model-list">{% for m in default_models %}<li><code>{{ m }}</code></li>{% endfor %}</ul>
+      <p class="meta">Set in <code>FDW_BAKEOFF_MODELS</code> in your .env file. You can also add one per piece.</p>
+      <form method="post" action="{% url 'bakeoff_check_models' %}">
+        {% csrf_token %}
+        <button class="btn" type="submit">Check available models</button>
+      </form>
+      {% if available %}
+        <details class="fold" open>
+          <summary>{{ available|length }} image models your key can reach</summary>
+          <ul class="model-list model-list-small">{% for m in available %}<li><code>{{ m.id }}</code>{% if m.name %} <span class="meta">{{ m.name }}</span>{% endif %}</li>{% endfor %}</ul>
+        </details>
+      {% endif %}
+    </section>
+  </div>
+
+  {% if pieces %}
+    <h2 class="section-title">Pieces</h2>
+    <ul class="cycle-list">
+      {% for row in pieces %}
+        <li>
+          <a class="cycle-row bake-row" href="{% url 'bakeoff_piece' row.piece.pk %}">
+            <img class="bake-thumb" src="{% url 'bakeoff_photo' row.piece.pk 'photo_front' %}" alt="" loading="lazy">
+            <div class="cycle-row-main">
+              <h2>{{ row.piece.name }}</h2>
+              <p>{% if not row.piece.spec %}Waiting for a description{% elif not row.progress.total %}Ready to choose models{% elif row.progress.waiting %}{{ row.progress.waiting }} images waiting{% else %}{{ row.progress.scored }} of {{ row.progress.done }} scored{% endif %}</p>
+            </div>
+            <dl class="cycle-row-facts">
+              <div><dt>Made</dt><dd>{{ row.progress.done }}</dd></div>
+              <div><dt>Failed</dt><dd>{{ row.progress.failed }}</dd></div>
+              <div><dt>Scored</dt><dd>{{ row.progress.scored }}</dd></div>
+            </dl>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+    <p><a class="btn" href="{% url 'bakeoff_results' %}">See results</a></p>
+  {% endif %}
+</section>
+{% endblock %}

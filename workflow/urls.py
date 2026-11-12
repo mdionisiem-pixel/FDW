@@ -1,8 +1,20 @@
 from django.urls import path
 
-from . import views
+from . import views, views_bakeoff
 
 urlpatterns = [
+    path("bakeoff/", views_bakeoff.home, name="bakeoff_home"),
+    path("bakeoff/pieces/new/", views_bakeoff.create_piece, name="bakeoff_create"),
+    path("bakeoff/check-models/", views_bakeoff.check_models, name="bakeoff_check_models"),
+    path("bakeoff/results/", views_bakeoff.results, name="bakeoff_results"),
+    path("bakeoff/pieces/<int:pk>/", views_bakeoff.piece_detail, name="bakeoff_piece"),
+    path("bakeoff/pieces/<int:pk>/describe/", views_bakeoff.describe, name="bakeoff_describe"),
+    path("bakeoff/pieces/<int:pk>/queue/", views_bakeoff.queue, name="bakeoff_queue"),
+    path("bakeoff/pieces/<int:pk>/make-next/", views_bakeoff.make_next, name="bakeoff_make_next"),
+    path("bakeoff/pieces/<int:pk>/retry/", views_bakeoff.retry, name="bakeoff_retry"),
+    path("bakeoff/pieces/<int:pk>/images/<int:image_pk>/score/", views_bakeoff.score, name="bakeoff_score"),
+    path("bakeoff/pieces/<int:pk>/photo/<str:field>/", views_bakeoff.photo, name="bakeoff_photo"),
+    path("bakeoff/images/<int:image_pk>/", views_bakeoff.image_file, name="bakeoff_image"),
     path("", views.dashboard, name="dashboard"),
     path("cycles/new/", views.create_cycle, name="create_cycle"),
     path("brand-brief/", views.brand_brief, name="brand_brief"),

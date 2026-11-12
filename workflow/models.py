@@ -331,3 +331,85 @@ class ModelCall(models.Model):
 
     def __str__(self):
         return f"{self.step} ({self.model})"
+
+
+# --- Image model bake-off ------------------------------------------------------
+
+
+class BakeoffPiece(models.Model):
+    """A finished Malina piece, photographed, used to compare image models."""
+
+    name = models.CharField(max_length=120)
+    notes = models.TextField(blank=True, help_text="Optional facts the photos do not show: fibre, size, technique.")
+    photo_front = models.FileField(upload_to="bakeoff/photos/")
+    photo_back = models.FileField(upload_to="bakeoff/photos/", blank=True)
+    photo_detail = models.FileField(upload_to="bakeoff/photos/", blank=True)
+    photo_worn = models.FileField(upload_to="bakeoff/photos/", blank=True)
+    # Written by Claude from the photos: description, checklist and shot prompts.
+    spec = models.JSONField(null=True, blank=True)
+    prompt_cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return self.name
+
+    def photos(self):
+        """(field name, label, file) for every photo that was uploaded."""
+        labels = (("photo_front", "Front"), ("photo_back", "Back"),
+                  ("photo_detail", "Detail"), ("photo_worn", "Worn"))
+        return [(field, label, getattr(self, field)) for field, label in labels if getattr(self, field)]
+
+
+class BakeoffImage(models.Model):
+    """One image made by one model for one shot of a piece, and the founder's scores for it."""
+
+    class Shot(models.TextChoices):
+        FRONT = "A", "Front packshot"
+        DETAIL = "C", "Detail close-up"
+        WORN = "D", "On a model"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Waiting"
+        DONE = "done", "Made"
+        FAILED = "failed", "Failed"
+
+    SCORE_FIELDS = ("matches_piece", "material_realism", "colour_accuracy", "photo_realism")
+
+    piece = models.ForeignKey(BakeoffPiece, on_delete=models.CASCADE, related_name="images")
+    model = models.CharField(max_length=120)
+    shot = models.CharField(max_length=1, choices=Shot.choices)
+    # A neutral label shown while scoring, so the model's name cannot sway the score.
+    code = models.CharField(max_length=4)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.PENDING)
+    prompt = models.TextField(blank=True)
+    file = models.FileField(upload_to="bakeoff/generated/", blank=True)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    error = models.TextField(blank=True)
+    seconds = models.FloatField(null=True, blank=True)
+    matches_piece = models.PositiveSmallIntegerField(null=True, blank=True)
+    material_realism = models.PositiveSmallIntegerField(null=True, blank=True)
+    colour_accuracy = models.PositiveSmallIntegerField(null=True, blank=True)
+    photo_realism = models.PositiveSmallIntegerField(null=True, blank=True)
+    scored_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["shot", "code"]
+        constraints = [
+            models.UniqueConstraint(fields=["piece", "model", "shot"], name="one_image_per_model_and_shot"),
+        ]
+
+    def __str__(self):
+        return f"{self.piece} {self.shot} {self.code}"
+
+    @property
+    def is_scored(self) -> bool:
+        return all(getattr(self, f) is not None for f in self.SCORE_FIELDS)
+
+    @property
+    def average_score(self):
+        values = [getattr(self, f) for f in self.SCORE_FIELDS if getattr(self, f) is not None]
+        return round(sum(values) / len(values), 2) if values else None

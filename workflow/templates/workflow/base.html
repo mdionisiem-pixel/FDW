@@ -24,6 +24,7 @@
     <nav aria-label="Main">
       <a href="{% url 'dashboard' %}" {% if request.resolver_match.url_name == 'dashboard' %}aria-current="page"{% endif %}>Cycles</a>
       <a href="{% url 'brand_brief' %}" {% if request.resolver_match.url_name == 'brand_brief' %}aria-current="page"{% endif %}>Brand brief</a>
+      <a href="{% url 'bakeoff_home' %}" {% if 'bakeoff' in request.resolver_match.url_name %}aria-current="page"{% endif %}>Image test</a>
       <a href="{% url 'admin:index' %}">Records</a>
     </nav>
     {% if dry_run %}

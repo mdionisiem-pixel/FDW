@@ -417,6 +417,18 @@ def respond(step: str, prompt: str) -> str:
     base = step.removesuffix("_retry")
     if base == "extract_signals":
         return _extract_signals(prompt)
+    if base == "bakeoff_describe":
+        name = _between(prompt, "piece_name").strip() or "the piece"
+        return json.dumps({
+            "description": f"Sample description of {name}, written by the dry run without looking at the photos.",
+            "checklist": ["Sample fact: overall shape", "Sample fact: main colour", "Sample fact: signature detail"],
+            "prompts": {
+                "A": f"Sample prompt for a front packshot of {name}.",
+                "C": f"Sample prompt for a detail close-up of {name}, the same piece as in the reference image.",
+                "D": f"Sample prompt for {name} on a model, the same piece as in the reference image.",
+            },
+            "unclear_from_photos": ["Sample: fibre content"],
+        })
     if base == "research_trends":
         return _research(prompt)
     if base == "reformat_findings":

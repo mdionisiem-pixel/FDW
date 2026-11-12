@@ -7,6 +7,8 @@ from django.contrib import admin
 
 from .models import (
     Approval,
+    BakeoffImage,
+    BakeoffPiece,
     BrandBrief,
     Concept,
     ConceptReview,
@@ -95,3 +97,14 @@ class ApprovalAdmin(ReadOnlyAdmin):
 class ModelCallAdmin(ReadOnlyAdmin):
     list_display = ("step", "cycle", "model", "input_tokens", "output_tokens", "web_searches", "cost_usd", "ok", "dry_run", "created_at")
     list_filter = ("step", "ok", "dry_run", "cycle")
+
+
+@admin.register(BakeoffPiece)
+class BakeoffPieceAdmin(ReadOnlyAdmin):
+    list_display = ("name", "prompt_cost_usd", "created_at")
+
+
+@admin.register(BakeoffImage)
+class BakeoffImageAdmin(ReadOnlyAdmin):
+    list_display = ("piece", "shot", "code", "model", "status", "cost_usd", "matches_piece", "scored_at")
+    list_filter = ("model", "status", "shot")
