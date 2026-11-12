@@ -1,0 +1,27 @@
+{% extends "workflow/base.html" %}
+{% block title %}Brand brief | Malina studio{% endblock %}
+{% block content %}
+<section class="page page-narrow">
+  <h1>Brand brief</h1>
+  <p class="lede">This text goes into every prompt. The model can only design for Malina as well as this describes it, so be specific: name the motifs, give hex colours, state prices.</p>
+
+  {% if brief.unconfirmed_lines %}
+    <aside class="callout">
+      <p><strong>{{ brief.unconfirmed_lines }} line{{ brief.unconfirmed_lines|pluralize }} still marked "To confirm".</strong>
+      Replace each one with your answer and remove the marker.</p>
+    </aside>
+  {% else %}
+    <p class="stamp stamp-ok">All lines confirmed</p>
+  {% endif %}
+
+  <form method="post" class="brief-form">
+    {% csrf_token %}
+    <label for="brief-text">Brand brief text</label>
+    <textarea id="brief-text" name="text" rows="30" spellcheck="true">{{ brief.text }}</textarea>
+    <div class="form-foot">
+      <p class="meta">Last saved {{ brief.updated_at|date:"j M Y, H:i" }}</p>
+      <button class="btn btn-primary" type="submit">Save brand brief</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Malina studio{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'workflow/app.css' %}">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <a class="wordmark" href="{% url 'dashboard' %}" aria-label="Malina studio, all cycles">
+      <svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true">
+        <circle cx="14" cy="14" r="12.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+        <circle cx="10" cy="10" r="1.7" fill="currentColor"/><circle cx="18" cy="10" r="1.7" fill="currentColor"/>
+        <circle cx="10" cy="18" r="1.7" fill="currentColor"/><circle cx="18" cy="18" r="1.7" fill="currentColor"/>
+        <path d="M10 10L18 18M18 10L10 18" stroke="var(--floss)" stroke-width="1.4"/>
+      </svg>
+      <span>Malina studio</span>
+    </a>
+    <nav aria-label="Main">
+      <a href="{% url 'dashboard' %}" {% if request.resolver_match.url_name == 'dashboard' %}aria-current="page"{% endif %}>Cycles</a>
+      <a href="{% url 'brand_brief' %}" {% if request.resolver_match.url_name == 'brand_brief' %}aria-current="page"{% endif %}>Brand brief</a>
+      <a href="{% url 'admin:index' %}">Records</a>
+    </nav>
+    {% if dry_run %}
+      <p class="mode" title="FDW_DRY_RUN is on. No model is called and nothing is spent.">Dry run: sample responses, no spend</p>
+    {% endif %}
+  </header>
+
+  {% if messages %}
+    <div class="notices" role="status" aria-live="polite">
+      {% for message in messages %}
+        <p class="notice notice-{{ message.tags }}">{{ message }}</p>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div class="working" id="working" hidden role="alertdialog" aria-modal="true" aria-labelledby="working-title">
+    <div class="working-card">
+      <svg class="working-stitch" viewBox="0 0 240 24" width="240" height="24" aria-hidden="true">
+        <path d="M4 12 H236" />
+      </svg>
+      <p id="working-title" class="working-title">Working</p>
+      <p class="working-note">This can take a minute or two. Keep this tab open; the page updates when it finishes.</p>
+    </div>
+  </div>
+
+  <script src="{% static 'workflow/app.js' %}" defer></script>
+</body>
+</html>

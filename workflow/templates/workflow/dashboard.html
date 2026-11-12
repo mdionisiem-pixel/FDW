@@ -1,0 +1,56 @@
+{% extends "workflow/base.html" %}
+{% block title %}Cycles | Malina studio{% endblock %}
+{% block content %}
+<section class="page">
+  <div class="page-head">
+    <div>
+      <h1>Collection cycles</h1>
+      <p class="lede">Each cycle goes from what your audience asks for to a collection you have chosen. You approve every step.</p>
+    </div>
+    <form class="new-cycle" method="post" action="{% url 'create_cycle' %}">
+      {% csrf_token %}
+      <label for="cycle-name">Start a cycle</label>
+      <div class="inline-field">
+        <input id="cycle-name" name="name" type="text" placeholder="Winter 2026" maxlength="120" required>
+        <button class="btn btn-primary" type="submit">Create cycle</button>
+      </div>
+    </form>
+  </div>
+
+  {% if brand_brief.unconfirmed_lines %}
+    <aside class="callout">
+      <p><strong>{{ brand_brief.unconfirmed_lines }} line{{ brand_brief.unconfirmed_lines|pluralize }} of the brand brief still need{{ brand_brief.unconfirmed_lines|pluralize:"s," }} your input.</strong>
+      Signature elements, palette, materials, price bands and markets shape every concept. Concepts designed without them will be generic.</p>
+      <a class="btn" href="{% url 'brand_brief' %}">Complete the brand brief</a>
+    </aside>
+  {% endif %}
+
+  {% if rows %}
+    <ul class="cycle-list">
+      {% for row in rows %}
+        <li>
+          <a class="cycle-row" href="{% url 'cycle_detail' row.cycle.pk %}">
+            <div class="cycle-row-main">
+              <h2>{{ row.cycle.name }}</h2>
+              <p>{{ row.cycle.get_status_display }}</p>
+            </div>
+            <ol class="mini-seam" aria-label="Stage {{ row.cycle.stage_number }} of 7">
+              {% for stage in row.rail %}<li class="mini-node is-{{ stage.state }}" title="{{ stage.number }}. {{ stage.name }}"></li>{% endfor %}
+            </ol>
+            <dl class="cycle-row-facts">
+              <div><dt>Signals</dt><dd>{{ row.cycle.raw_items.count }}</dd></div>
+              <div><dt>Spent</dt><dd>${{ row.spend.spent|floatformat:2 }}</dd></div>
+              <div><dt>Started</dt><dd>{{ row.cycle.created_at|date:"j M Y" }}</dd></div>
+            </dl>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="empty">
+      <h2>No cycles yet</h2>
+      <p>Create one above, then paste the messages and comments where people asked to buy. Those are the strongest evidence you have.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,389 @@
+{% extends "workflow/base.html" %}
+{% load workflow_extras %}
+{% block title %}{{ cycle.name }} | Malina studio{% endblock %}
+{% block content %}
+<div class="cycle">
+  <aside class="seam" aria-label="Stages">
+    <ol>
+      {% for stage in rail %}
+        <li class="seam-step is-{{ stage.state }}" {% if stage.state == "current" %}aria-current="step"{% endif %}>
+          <span class="seam-node" aria-hidden="true"></span>
+          <div>
+            <p class="seam-name">{{ stage.number }}. {{ stage.name }}</p>
+            <p class="seam-note">
+              {% if stage.state == "later" %}Built in a later slice{% elif stage.state == "done" %}Approved{% else %}{{ stage.summary }}{% endif %}
+            </p>
+          </div>
+        </li>
+      {% endfor %}
+    </ol>
+  </aside>
+
+  <div class="cycle-body">
+    <header class="cycle-head">
+      <div>
+        <p class="crumb"><a href="{% url 'dashboard' %}">Cycles</a></p>
+        <h1>{{ cycle.name }}</h1>
+        <p class="lede">{{ cycle.get_status_display }}</p>
+      </div>
+      <div class="spend" aria-label="Model spend for this cycle">
+        <p class="spend-figure">${{ spend.spent|floatformat:2 }} <span>of ${{ spend.limit|floatformat:2 }} limit</span></p>
+        <div class="spend-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ spend.percent }}">
+          <div class="spend-fill" style="width: {{ spend.percent }}%"></div>
+        </div>
+        <p class="meta">Calls stop automatically at the limit.</p>
+      </div>
+    </header>
+
+    <!-- Stage 1 -->
+    <section class="stage" id="stage-1" aria-labelledby="stage-1-title">
+      <h2 id="stage-1-title">Demand signals</h2>
+      <p class="stage-intro">Paste what people have actually said: messages asking the price, comments, post results, trend lines. One per line. Messages from your own audience count for most.</p>
+
+      {% if can_edit_items %}
+        <form class="paste" method="post" action="{% url 'add_items' cycle.pk %}">
+          {% csrf_token %}
+          <div class="paste-fields">
+            <div class="field field-grow">
+              <label for="items">Messages, one per line</label>
+              <textarea id="items" name="items" rows="5" placeholder="How much is the embroidered cardigan?&#10;Do you make these hats in green?" required></textarea>
+            </div>
+            <div class="field">
+              <label for="source">Where they came from</label>
+              <select id="source" name="source">
+                {% for value, name in sources %}<option value="{{ value }}">{{ name }}</option>{% endfor %}
+              </select>
+              <button class="btn" type="submit">Add to this cycle</button>
+            </div>
+          </div>
+        </form>
+      {% endif %}
+
+      {% if raw_items %}
+        <details class="fold" {% if can_edit_items %}open{% endif %}>
+          <summary>
+            {{ raw_items|length }} item{{ raw_items|length|pluralize }} collected
+            <span class="chips">{% for name, count in source_counts %}<span class="chip">{{ name }} {{ count }}</span>{% endfor %}</span>
+          </summary>
+          <ul class="items">
+            {% for item in raw_items %}
+              <li>
+                <span class="chip chip-source">{{ item.get_source_display }}</span>
+                <span class="item-text">{{ item.text }}</span>
+                {% if can_edit_items %}
+                  <form method="post" action="{% url 'delete_item' cycle.pk item.pk %}">
+                    {% csrf_token %}
+                    <button class="link-btn" type="submit" aria-label="Remove this item">Remove</button>
+                  </form>
+                {% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% else %}
+        <div class="empty empty-inline">
+          <p>Nothing collected yet. The demand brief is written from these items, so it can only be as good as what you paste here.</p>
+        </div>
+      {% endif %}
+
+      {% if can_run_stage1 and raw_items %}
+        <form method="post" action="{% url 'run_stage1' cycle.pk %}" data-working="Reading {{ raw_items|length }} item{{ raw_items|length|pluralize }} and writing the demand brief">
+          {% csrf_token %}
+          <button class="btn btn-primary" type="submit">Write demand brief</button>
+        </form>
+      {% endif %}
+
+      {% if signals %}
+        <div class="evidence">
+          <div class="tally">
+            <button type="button" class="tally-cell is-active" data-filter="all"><strong>{{ signals|length }}</strong> signals</button>
+            <button type="button" class="tally-cell tally-purchase" data-filter="purchase"><strong>{{ intent_counts.purchase }}</strong> asked to buy</button>
+            <button type="button" class="tally-cell" data-filter="interest"><strong>{{ intent_counts.interest }}</strong> showed interest</button>
+            <button type="button" class="tally-cell" data-filter="trend"><strong>{{ intent_counts.trend }}</strong> external trend</button>
+          </div>
+          {% if product_counts %}
+            <p class="meta">Most mentioned: {% for name, count in product_counts %}{{ name }} ({{ count }}){% if not forloop.last %}, {% endif %}{% endfor %}</p>
+          {% endif %}
+          <details class="fold">
+            <summary>Extracted signals</summary>
+            <div class="table-wrap">
+              <table class="signals" id="signals-table">
+                <thead><tr><th>Intent</th><th>Product</th><th>Technique</th><th>Quote</th><th>Source</th></tr></thead>
+                <tbody>
+                  {% for s in signals %}
+                    <tr data-intent="{{ s.intent }}">
+                      <td><span class="intent intent-{{ s.intent }}">{{ s.intent|label }}</span></td>
+                      <td>{{ s.product_type|default:"Not stated" }}</td>
+                      <td>{{ s.technique|default:"Not stated" }}</td>
+                      <td class="quote">{% if s.quote %}"{{ s.quote }}"{% endif %}</td>
+                      <td>{{ s.source|label }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      {% endif %}
+
+      {% if brief %}
+        <article class="brief">
+          <header class="brief-head">
+            <h3>Demand brief</h3>
+            <p class="stamp stamp-{{ brief.status }}">{{ brief.get_status_display }}{% if brief.decided_at %}, {{ brief.decided_at|date:"j M Y" }}{% endif %}</p>
+          </header>
+          <div class="brief-text">{{ brief.text|linebreaks }}</div>
+          {% if brief.founder_notes %}
+            <p class="note"><strong>Your notes:</strong> {{ brief.founder_notes }}</p>
+          {% endif %}
+        </article>
+
+        {% if brief_pending %}
+          <form class="gate" method="post" action="{% url 'decide_brief' cycle.pk %}">
+            {% csrf_token %}
+            <h3>Gate 1: your decision</h3>
+            <p>Approve only if this matches what you see in your messages. Stage 2 designs directly from it.</p>
+            <label for="brief-notes">Notes for the designer step, or the reason for rejecting</label>
+            <textarea id="brief-notes" name="notes" rows="3" placeholder="For example: focus on the hats and gloves; ignore the bag requests."></textarea>
+            <div class="gate-actions">
+              <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve demand brief</button>
+              <button class="btn btn-danger" type="submit" name="decision" value="reject">Reject demand brief</button>
+            </div>
+          </form>
+        {% endif %}
+      {% endif %}
+    </section>
+
+    <!-- Stage 2 -->
+    <section class="stage {% if cycle.stage_number < 2 %}stage-locked{% endif %}" id="stage-2" aria-labelledby="stage-2-title">
+      <h2 id="stage-2-title">Collection concepts</h2>
+      {% if cycle.stage_number < 2 %}
+        <p class="stage-intro">Unlocks when you approve a demand brief.</p>
+      {% else %}
+        <p class="stage-intro">Three different directions designed from the approved brief. Each one is then checked by a separate reviewer that did not write it.</p>
+      {% endif %}
+
+      {% if can_run_stage2 %}
+        <form method="post" action="{% url 'run_stage2' cycle.pk %}" data-working="Designing three collection concepts and reviewing each one">
+          {% csrf_token %}
+          <button class="btn btn-primary" type="submit">Design three concepts</button>
+        </form>
+      {% endif %}
+
+      {% if cards %}
+        <form method="post" action="{% url 'select_concepts' cycle.pk %}" id="select-form">
+          {% csrf_token %}
+
+          <div class="table-wrap">
+            <table class="compare">
+              <caption>Reviewer scores, 1 to 5</caption>
+              <thead>
+                <tr><th scope="col">Concept</th>{% for name in criteria %}<th scope="col">{{ name }}</th>{% endfor %}<th scope="col">Average</th><th scope="col">Verdict</th></tr>
+              </thead>
+              <tbody>
+                {% for card in cards %}
+                  <tr>
+                    <th scope="row"><a href="#concept-{{ card.concept.pk }}">{{ card.concept.concept_id }} {{ card.concept.name }}</a></th>
+                    {% for s in card.scores %}<td class="score score-{{ s.value|floatformat:0 }}">{{ s.value|default:"–" }}</td>{% endfor %}
+                    <td><strong>{{ card.review.average_score|default:"–" }}</strong></td>
+                    <td><span class="verdict verdict-{{ card.review.overall }}">{{ card.review.overall|label }}</span></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="concepts">
+            {% for card in cards %}
+              <article class="concept is-{{ card.concept.status }}" id="concept-{{ card.concept.pk }}">
+                <div class="threadcard" aria-label="Palette">
+                  {% for colour in card.data.palette %}
+                    <div class="thread" style="--thread: {{ colour.hex }}">
+                      <span class="thread-swatch"></span>
+                      <span class="thread-name">{{ colour.name }}</span>
+                      <span class="thread-hex">{{ colour.hex }}</span>
+                    </div>
+                  {% endfor %}
+                </div>
+
+                <div class="concept-body">
+                  <header class="concept-head">
+                    <p class="concept-id">{{ card.concept.concept_id }}</p>
+                    <h3>{{ card.concept.name }}</h3>
+                    <p class="stamp stamp-{{ card.concept.status }}">{{ card.concept.get_status_display }}</p>
+                  </header>
+
+                  <div class="concept-cols">
+                    <div class="concept-story">
+                      <p class="theme">{{ card.data.theme }}</p>
+                      <dl class="facts">
+                        <div><dt>Signature detail</dt><dd>{{ card.data.signature_detail }}</dd></div>
+                        <div><dt>For</dt><dd>{{ card.data.target_customer }}</dd></div>
+                        <div><dt>Evidence</dt><dd>{{ card.data.why_now }}</dd></div>
+                        <div><dt>Pieces and price</dt><dd>{{ card.piece_count }} pieces{% if card.price_range %}, €{{ card.price_range.0|floatformat:0 }} to €{{ card.price_range.1|floatformat:0 }}{% endif %}</dd></div>
+                      </dl>
+                    </div>
+
+                    <div class="concept-review">
+                      <h4>Reviewer</h4>
+                      <ul class="scores">
+                        {% for s in card.scores %}
+                          <li title="{{ s.reason }}">
+                            <span class="score-label">{{ s.label }}</span>
+                            <span class="stitches" role="img" aria-label="{{ s.value }} out of 5">
+                              {% for i in "12345" %}<span class="stitch {% if forloop.counter <= s.value %}on{% endif %}"></span>{% endfor %}
+                            </span>
+                          </li>
+                        {% endfor %}
+                      </ul>
+                      {% if card.concept.revision_count %}
+                        <p class="meta">Revised once after review.</p>
+                      {% endif %}
+                    </div>
+                  </div>
+
+                  {% if card.blocking %}
+                    <div class="issues issues-blocking">
+                      <h4>Unresolved issues</h4>
+                      <ul>{% for issue in card.blocking %}<li>{{ issue }}</li>{% endfor %}</ul>
+                    </div>
+                  {% endif %}
+                  {% if card.risks %}
+                    <div class="issues">
+                      <h4>Risks the reviewer raised</h4>
+                      <ul>{% for risk in card.risks %}<li>{{ risk }}</li>{% endfor %}</ul>
+                    </div>
+                  {% endif %}
+
+                  <div class="pieces">
+                    <h4>Pieces</h4>
+                    {% for piece in card.data.pieces %}
+                      <details class="piece">
+                        <summary>
+                          <span class="piece-role role-{{ piece.role }}">{{ piece.role|label }}</span>
+                          <span class="piece-name">{{ piece.name }}</span>
+                          <span class="piece-tier tier-{{ piece.production_route }}">{{ piece.production_route|tier }}</span>
+                          <span class="piece-price">€{{ piece.target_price_eur|floatformat:0 }}</span>
+                        </summary>
+                        <div class="spec">
+                          <dl>
+                            <div><dt>Category</dt><dd>{{ piece.category }}</dd></div>
+                            <div><dt>Silhouette</dt><dd>{{ piece.silhouette }}</dd></div>
+                            <div><dt>Technique</dt><dd>{{ piece.technique }}</dd></div>
+                            <div><dt>Construction</dt><dd>{{ piece.construction }}</dd></div>
+                            <div><dt>Materials</dt><dd>{{ piece.materials }}</dd></div>
+                            <div><dt>Surface detail</dt><dd>{{ piece.surface_detail }}</dd></div>
+                            <div><dt>Trims</dt><dd>{{ piece.trims|default:"None" }}</dd></div>
+                            <div><dt>Made by</dt><dd>{{ piece.production_route|route_name }}</dd></div>
+                            {% if piece.feasibility_notes %}<div><dt>Feasibility</dt><dd>{{ piece.feasibility_notes }}</dd></div>{% endif %}
+                          </dl>
+                          <div class="spec-side">
+                            <h5>Colours</h5>
+                            <ul class="spec-colours">
+                              {% for colour in piece.colours %}
+                                <li><span class="dot" style="background: {{ colour.hex }}"></span>{{ colour.name }} <span class="meta">{{ colour.hex }}, {{ colour.where }}</span></li>
+                              {% endfor %}
+                            </ul>
+                            <h5>Measurements, cm</h5>
+                            <ul class="spec-dims">
+                              {% for key, value in piece.dimensions_cm.items %}<li><span>{{ key|label }}</span><strong>{{ value }}</strong></li>{% endfor %}
+                            </ul>
+                          </div>
+                        </div>
+                      </details>
+                    {% endfor %}
+                  </div>
+
+                  {% if concepts_pending %}
+                    <label class="pick">
+                      <input type="checkbox" name="concepts" value="{{ card.concept.pk }}">
+                      <span>Pick {{ card.concept.name }}</span>
+                    </label>
+                  {% endif %}
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+
+          {% if concepts_pending %}
+            <div class="gate">
+              <h3>Gate 2: your decision</h3>
+              <p>Pick one or two concepts. Their piece specifications become the fixed reference for sourcing, images, 3D and page copy.</p>
+              <label for="select-notes">Notes on your choice</label>
+              <textarea id="select-notes" name="notes" rows="2" placeholder="Why this one, and anything to change before prototyping."></textarea>
+              <div class="gate-actions">
+                <button class="btn btn-primary" type="submit" id="select-button" disabled>Select collection</button>
+                <p class="meta" id="select-hint">Pick one or two concepts above.</p>
+              </div>
+            </div>
+          {% endif %}
+        </form>
+      {% endif %}
+    </section>
+
+    {% if pieces %}
+      <section class="stage" id="approved" aria-labelledby="approved-title">
+        <h2 id="approved-title">Approved pieces</h2>
+        <p class="stage-intro">These specifications are now fixed. The sourcing check, stage 3, arrives in the next slice.</p>
+        <div class="table-wrap">
+          <table class="approved">
+            <thead><tr><th>Piece</th><th>Role</th><th>Tier</th><th>Made by</th><th class="num">Price</th></tr></thead>
+            <tbody>
+              {% for piece in pieces %}
+                <tr>
+                  <td><strong>{{ piece.name }}</strong> <span class="meta">{{ piece.piece_id }}</span></td>
+                  <td>{{ piece.role|label }}</td>
+                  <td><span class="piece-tier tier-{{ piece.production_route }}">{{ piece.tier }}</span></td>
+                  <td>{{ piece.production_route|route_name }}</td>
+                  <td class="num">€{{ piece.target_price_eur|floatformat:0 }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+
+    <section class="stage stage-quiet" id="activity" aria-labelledby="activity-title">
+      <h2 id="activity-title">Record</h2>
+      <details class="fold" {% if approvals %}open{% endif %}>
+        <summary>Your decisions ({{ approvals|length }})</summary>
+        {% if approvals %}
+          <ul class="log">
+            {% for a in approvals %}
+              <li><strong>Gate {{ a.stage }}: {{ a.decision }}</strong> {{ a.item }}{% if a.notes %} <span class="meta">"{{ a.notes }}"</span>{% endif %} <span class="meta">{{ a.decided_at|date:"j M Y, H:i" }}{% if a.decided_by %} by {{ a.decided_by }}{% endif %}</span></li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="meta">No decisions recorded yet.</p>
+        {% endif %}
+      </details>
+      <details class="fold">
+        <summary>Model calls ({{ model_calls|length }})</summary>
+        {% if model_calls %}
+          <div class="table-wrap">
+            <table class="calls">
+              <thead><tr><th>Step</th><th>Model</th><th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Cost</th><th>Result</th><th>When</th></tr></thead>
+              <tbody>
+                {% for call in model_calls %}
+                  <tr>
+                    <td>{{ call.step|label }}</td>
+                    <td>{{ call.model }}{% if call.dry_run %} <span class="meta">sample</span>{% endif %}</td>
+                    <td class="num">{{ call.input_tokens }}</td>
+                    <td class="num">{{ call.output_tokens }}</td>
+                    <td class="num">${{ call.cost_usd }}</td>
+                    <td>{% if call.ok %}OK{% else %}<span class="failed" title="{{ call.error }}">Failed</span>{% endif %}</td>
+                    <td>{{ call.created_at|date:"j M, H:i" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p class="meta">No model calls yet.</p>
+        {% endif %}
+      </details>
+    </section>
+  </div>
+</div>
+{% endblock %}
