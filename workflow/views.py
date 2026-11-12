@@ -5,6 +5,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from . import stages
@@ -31,6 +32,32 @@ CRITERION_LABELS = {
     "price_fit": "Price fit",
     "spec_completeness": "Specification",
 }
+
+
+def _season_years():
+    """The years a collection can sensibly be planned for: this year and the next two."""
+    this_year = timezone.localdate().year
+    return [this_year, this_year + 1, this_year + 2]
+
+
+def _apply_research_inputs(request, cycle):
+    """Save the season and direction from a posted form. Returns an error message, or None."""
+    season = request.POST.get("season", "")
+    if season not in Cycle.Season.values:
+        season = ""
+    year = None
+    raw_year = request.POST.get("season_year", "").strip()
+    if season and season != Cycle.Season.YEAR_ROUND and raw_year:
+        allowed = _season_years()
+        if raw_year.isdigit() and int(raw_year) in allowed:
+            year = int(raw_year)
+        else:
+            return f"Choose a year from {allowed[0]} to {allowed[-1]}."
+    cycle.direction = request.POST.get("direction", "").strip()[:4000]
+    cycle.season = season
+    cycle.season_year = year
+    cycle.save(update_fields=["direction", "season", "season_year"])
+    return None
 
 
 def _stage_rail(cycle):
@@ -146,6 +173,8 @@ def cycle_detail(request, pk):
         "source_counts": Counter(i.get_source_display() for i in raw_items).most_common(),
         "sources": RawItem.Source.choices,
         "findings": list(cycle.findings.all()),
+        "seasons": Cycle.Season.choices,
+        "season_years": _season_years(),
         "signals": signals,
         "intent_counts": {
             "purchase": intent_counts.get("purchase", 0),
@@ -206,9 +235,11 @@ def save_direction(request, pk):
     if cycle.status not in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
         messages.error(request, "The direction is locked once a research brief has been written from it.")
         return redirect("cycle_detail", pk=pk)
-    cycle.direction = request.POST.get("direction", "").strip()[:4000]
-    cycle.save(update_fields=["direction"])
-    messages.success(request, "Direction saved." if cycle.direction else "Direction cleared.")
+    error = _apply_research_inputs(request, cycle)
+    if error:
+        messages.error(request, error)
+    else:
+        messages.success(request, "Research inputs saved.")
     return redirect("cycle_detail", pk=pk)
 
 
@@ -216,6 +247,13 @@ def save_direction(request, pk):
 @require_POST
 def run_stage1(request, pk):
     cycle = get_object_or_404(Cycle, pk=pk)
+    # The research button sits in the same form as the inputs, so whatever is on
+    # screen is what gets researched, saved or not.
+    if "season" in request.POST and cycle.status in (Cycle.Status.NEW, Cycle.Status.BRIEF_REJECTED):
+        error = _apply_research_inputs(request, cycle)
+        if error:
+            messages.error(request, error)
+            return redirect("cycle_detail", pk=pk)
     try:
         stages.run_stage1(cycle)
         messages.success(request, "Research finished and brief written. Read it and decide below.")

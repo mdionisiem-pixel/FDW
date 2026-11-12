@@ -75,12 +75,21 @@ def sample_source_urls() -> list:
     return [f[4] for f in SAMPLE_FINDINGS]
 
 
+SAMPLE_TIMEFRAMES = [
+    ("recurring", "Sample: Autumn/Winter 2024 and 2025"),
+    ("both", "Sample: Autumn/Winter 2025 and this year"),
+    ("current", None),
+    ("current", None),
+]
+
+
 def _research(prompt: str) -> str:
     findings = [
-        {"theme": t, "what_people_want": w, "evidence": e, "source_title": title,
-         "source_url": url, "source_date": date,
+        {"theme": t, "what_people_want": w, "evidence": e,
+         "timeframe": SAMPLE_TIMEFRAMES[i][0], "seasons_observed": SAMPLE_TIMEFRAMES[i][1],
+         "source_title": title, "source_url": url, "source_date": date,
          "relevance": "Sample relevance: fits craft techniques named in the brand brief."}
-        for t, w, e, title, url, date in SAMPLE_FINDINGS
+        for i, (t, w, e, title, url, date) in enumerate(SAMPLE_FINDINGS)
     ]
     return json.dumps({"findings": findings, "searches_summary": "Sample searches; no web search was run."})
 
@@ -95,6 +104,7 @@ def _demand_brief(prompt: str) -> str:
     except json.JSONDecodeError:
         findings = []
     direction = _between(prompt, "founder_direction").strip()
+    season = _between(prompt, "target_season").strip()
     purchase = [s for s in signals if s.get("intent") == "purchase"]
     interest = [s for s in signals if s.get("intent") == "interest"]
     trend = [s for s in signals if s.get("intent") == "trend"]
@@ -126,8 +136,18 @@ def _demand_brief(prompt: str) -> str:
     for f in findings[:5]:
         lines.append(
             f"- {f.get('theme')}: {f.get('what_people_want')} Rests on web research "
-            f"({f.get('source_title')}). Evidence: weak, single source."
+            f"({f.get('source_title')}). Time frame: {f.get('timeframe')}. Evidence: weak, single source."
         )
+    recurring = [f.get("theme") for f in findings if f.get("timeframe") in ("recurring", "both")]
+    current = [f.get("theme") for f in findings if f.get("timeframe") in ("current", "both")]
+    lines += [
+        "",
+        "Season view",
+        f"Target season: {season.splitlines()[0] if season else 'not set'}",
+        f"Recurring in past seasons: {', '.join(recurring) or 'none found'}.",
+        f"Current trends: {', '.join(current) or 'none found'}.",
+        "Fading: none found by the dry-run rules.",
+    ]
     for name, c in ranked:
         quotes = "; ".join(f'"{q}"' for q in c["quotes"]) or "no quotes"
         lines.append(

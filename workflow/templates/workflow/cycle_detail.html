@@ -24,7 +24,7 @@
       <div>
         <p class="crumb"><a href="{% url 'dashboard' %}">Cycles</a></p>
         <h1>{{ cycle.name }}</h1>
-        <p class="lede">{{ cycle.get_status_display }}</p>
+        <p class="lede">{{ cycle.get_status_display }}{% if cycle.season_label %}, designing for {{ cycle.season_label }}{% endif %}</p>
       </div>
       <div class="spend" aria-label="Model spend for this cycle">
         <p class="spend-figure">${{ spend.spent|floatformat:2 }} <span>of ${{ spend.limit|floatformat:2 }} limit</span></p>
@@ -43,17 +43,30 @@
       {% if can_edit_items %}
         <form class="direction" method="post" action="{% url 'save_direction' cycle.pk %}">
           {% csrf_token %}
+          <div class="season-fields">
+            <div class="field">
+              <label for="season">Season to design for</label>
+              <select id="season" name="season">
+                <option value="" {% if not cycle.season %}selected{% endif %}>Let the research decide</option>
+                {% for value, name in seasons %}<option value="{{ value }}" {% if cycle.season == value %}selected{% endif %}>{{ name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="season-year">Year</label>
+              <select id="season-year" name="season_year">
+                <option value="" {% if not cycle.season_year %}selected{% endif %}>Not set</option>
+                {% for year in season_years %}<option value="{{ year }}" {% if cycle.season_year == year %}selected{% endif %}>{{ year }}</option>{% endfor %}
+              </select>
+            </div>
+            <p class="meta season-help">The research compares this season across the last two to three years with what is rising now, so you can see what returns every year, what is new, and what is fading.</p>
+          </div>
           <label for="direction">Your direction or ideas, if you have any</label>
           <textarea id="direction" name="direction" rows="3" placeholder="For example: winter accessories, hand-knit hats and gloves, something bolder than last year.">{{ cycle.direction }}</textarea>
           <div class="form-foot">
             <p class="meta">The research checks your direction first, then looks beyond it. At least one concept will develop it.</p>
-            <button class="btn" type="submit">Save direction</button>
+            <button class="btn" type="submit">Save research inputs</button>
           </div>
-        </form>
-
-        <form method="post" action="{% url 'run_stage1' cycle.pk %}" data-working="Researching the market and writing the brief">
-          {% csrf_token %}
-          <button class="btn btn-primary" type="submit">Research the market</button>
+          <button class="btn btn-primary" type="submit" formaction="{% url 'run_stage1' cycle.pk %}" data-working="Researching the market and writing the brief">Research the market</button>
         </form>
 
         <details class="fold fold-optional">
@@ -90,8 +103,9 @@
             </ul>
           {% endif %}
         </details>
-      {% elif cycle.direction %}
-        <p class="note note-plain"><strong>Your direction:</strong> {{ cycle.direction }}</p>
+      {% else %}
+        {% if cycle.season_label %}<p class="note note-plain"><strong>Season:</strong> {{ cycle.season_label }}</p>{% endif %}
+        {% if cycle.direction %}<p class="note note-plain"><strong>Your direction:</strong> {{ cycle.direction }}</p>{% endif %}
       {% endif %}
 
       {% if findings %}
@@ -101,6 +115,7 @@
             {% for f in findings %}
               <li class="finding {% if not f.verified %}is-dropped{% endif %}">
                 <div class="finding-head">
+                  <p class="timeframe timeframe-{{ f.timeframe }}">{% if f.timeframe == "recurring" %}Recurs in past seasons{% elif f.timeframe == "both" %}Recurs and rising now{% else %}Current trend{% endif %}{% if f.seasons_observed %}<span class="meta"> {{ f.seasons_observed }}</span>{% endif %}</p>
                   <h4>{{ f.theme }}</h4>
                   {% if f.verified %}
                     <a class="source" href="{{ f.source_url }}" target="_blank" rel="noopener noreferrer">{{ f.source_title|default:"Source" }}{% if f.source_date %}, {{ f.source_date }}{% endif %}</a>

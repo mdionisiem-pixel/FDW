@@ -391,3 +391,11 @@ thead th { font-size: 0.82rem; color: var(--ink-soft); font-weight: 600; border-
 .finding .source:hover { color: var(--floss-deep); }
 .finding.is-dropped { border-style: dashed; opacity: 0.7; }
 .note-plain { border-top: 0; padding-top: 0; margin: 0 0 1rem; max-width: var(--measure); }
+
+/* Season inputs and time-frame labels */
+.season-fields { display: grid; grid-template-columns: minmax(12rem, 16rem) minmax(7rem, 9rem) minmax(0, 1fr); gap: 1rem; align-items: end; margin-bottom: 1rem; }
+.season-help { align-self: center; max-width: 48ch; }
+.timeframe { font-size: 0.8rem; font-weight: 600; color: var(--ink-soft); }
+.timeframe-recurring, .timeframe-both { color: var(--moss); }
+.timeframe .meta { font-weight: 400; font-size: 0.8rem; }
+@media (max-width: 60rem) { .season-fields { grid-template-columns: 1fr 1fr; } .season-help { grid-column: 1 / -1; } }

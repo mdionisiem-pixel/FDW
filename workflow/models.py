@@ -59,6 +59,11 @@ class BrandBrief(models.Model):
 class Cycle(models.Model):
     """One pass from market research to a chosen collection."""
 
+    class Season(models.TextChoices):
+        SPRING_SUMMER = "spring_summer", "Spring/Summer"
+        AUTUMN_WINTER = "autumn_winter", "Autumn/Winter"
+        YEAR_ROUND = "year_round", "Year-round"
+
     class Status(models.TextChoices):
         NEW = "new", "Ready for market research"
         BRIEF_PENDING = "brief_pending", "Research brief awaiting approval"
@@ -74,6 +79,8 @@ class Cycle(models.Model):
         blank=True,
         help_text="Optional. The founder's own direction or ideas for this collection.",
     )
+    season = models.CharField(max_length=16, choices=Season.choices, blank=True)
+    season_year = models.PositiveSmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -81,6 +88,16 @@ class Cycle(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def season_label(self) -> str:
+        """The target season in words, or an empty string when none was chosen."""
+        if not self.season:
+            return ""
+        label = self.get_season_display()
+        if self.season_year and self.season != self.Season.YEAR_ROUND:
+            label = f"{label} {self.season_year}"
+        return label
 
     @property
     def spend_usd(self) -> Decimal:
@@ -159,6 +176,9 @@ class TrendFinding(models.Model):
     source_url = models.URLField(max_length=1000)
     source_date = models.CharField(max_length=20, blank=True)
     relevance = models.TextField(blank=True)
+    # recurring: seen in the same season in earlier years. current: rising now. both: each.
+    timeframe = models.CharField(max_length=10, blank=True)
+    seasons_observed = models.CharField(max_length=200, blank=True)
     # True only when the URL was among the search results the model received.
     verified = models.BooleanField(default=False)
 

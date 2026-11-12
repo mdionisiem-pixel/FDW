@@ -54,6 +54,12 @@ def _direction(cycle: Cycle) -> str:
     return cycle.direction.strip() or "None given."
 
 
+def _target_season(cycle: Cycle) -> str:
+    if cycle.season_label:
+        return cycle.season_label
+    return "Not set. Research the next season to arrive in the markets named in the brand brief, and say which season that is."
+
+
 def run_research(cycle: Cycle, brand_brief: str, client) -> list:
     """Search the web for current demand and return findings, each marked verified or not.
 
@@ -65,6 +71,7 @@ def run_research(cycle: Cycle, brand_brief: str, client) -> list:
         prompts.RESEARCH_TRENDS,
         brand_brief=brand_brief,
         founder_direction=_direction(cycle),
+        target_season=_target_season(cycle),
         today=timezone.localdate().isoformat(),
     )
     result = run_result(
@@ -141,6 +148,7 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
         prompts.DEMAND_BRIEF,
         brand_brief=brand_brief,
         founder_direction=_direction(cycle),
+        target_season=_target_season(cycle),
         findings_json=json.dumps(
             [{k: v for k, v in f.items() if k != "verified"} for f in verified],
             ensure_ascii=False,
@@ -181,6 +189,8 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
                 source_url=str(f["source_url"])[:1000],
                 source_date=str(f.get("source_date") or "")[:20],
                 relevance=str(f.get("relevance") or ""),
+                timeframe=f["timeframe"],
+                seasons_observed=str(f.get("seasons_observed") or "")[:200],
                 verified=f["verified"],
             )
             for f in findings
@@ -257,6 +267,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
         brand_brief=brand_brief,
         approved_demand_brief=brief.text,
         founder_direction=_direction(cycle),
+        target_season=_target_season(cycle),
         gate1_notes=brief.founder_notes or "No notes.",
         past_test_results=NO_PAST_RESULTS,
     )

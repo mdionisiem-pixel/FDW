@@ -19,6 +19,7 @@ REVIEW_CRITERIA = (
     "spec_completeness",
 )
 REVIEW_OVERALL = {"recommend", "revise", "reject"}
+FINDING_TIMEFRAMES = {"recurring", "current", "both"}
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 HANDMADE_WORDS = re.compile(r"\bhand[\s-]?made\b", re.IGNORECASE)
 
@@ -103,6 +104,8 @@ def validate_findings(data):
         url = str(item.get("source_url") or "")
         if not url.lower().startswith(("http://", "https://")):
             problems.append(f"{where}: source_url must be a full web address")
+        if item.get("timeframe") not in FINDING_TIMEFRAMES:
+            problems.append(f"{where}: timeframe must be one of {sorted(FINDING_TIMEFRAMES)}")
     if problems:
         raise SchemaError(problems)
     return data

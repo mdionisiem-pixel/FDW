@@ -60,7 +60,7 @@ class SignalAdmin(ReadOnlyAdmin):
 
 @admin.register(TrendFinding)
 class TrendFindingAdmin(ReadOnlyAdmin):
-    list_display = ("theme", "cycle", "source_title", "source_date", "verified")
+    list_display = ("theme", "cycle", "timeframe", "source_title", "source_date", "verified")
     list_filter = ("verified", "cycle")
 
 

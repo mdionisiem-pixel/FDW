@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from . import dryrun, prompts, schemas, stages
 from .llm import AnthropicClient, DryRunClient, LLMResult, SpendLimitError, StageError, cost_of, parse_json
@@ -182,7 +183,8 @@ class ResearchTests(TestCase):
         data = json.loads(dryrun.respond("research_trends", ""))
         data["findings"].append({
             "theme": "Invented theme", "what_people_want": "Something nobody reported.",
-            "evidence": "No real source.", "source_title": "Made up", "source_url": extra_url,
+            "evidence": "No real source.", "timeframe": "current", "seasons_observed": None,
+            "source_title": "Made up", "source_url": extra_url,
             "source_date": None, "relevance": "",
         })
         return json.dumps(data)
@@ -243,6 +245,36 @@ class ResearchTests(TestCase):
         stages.run_stage1(cycle2, client=client2)
         self.assertEqual(client2.search_calls, 1)
         self.assertEqual(cycle2.findings.filter(verified=True).count(), 4)
+
+    def test_target_season_reaches_research_brief_and_designer(self):
+        cycle = Cycle.objects.create(name="Season", season="autumn_winter", season_year=2027)
+        self.assertEqual(cycle.season_label, "Autumn/Winter 2027")
+        brief = stages.run_stage1(cycle, client=ScriptedClient())
+        for step in ("research_trends", "demand_brief"):
+            self.assertIn("Autumn/Winter 2027", ModelCall.objects.get(cycle=cycle, step=step).prompt)
+        stages.decide_brief(brief, "approve")
+        cycle.refresh_from_db()
+        stages.run_stage2(cycle, client=ScriptedClient())
+        self.assertIn("Autumn/Winter 2027", ModelCall.objects.get(cycle=cycle, step="generate_concepts").prompt)
+
+    def test_without_a_season_the_research_is_told_to_pick_the_next_one(self):
+        cycle = Cycle.objects.create(name="No season")
+        stages.run_stage1(cycle, client=ScriptedClient())
+        prompt = ModelCall.objects.get(cycle=cycle, step="research_trends").prompt
+        self.assertIn("Not set. Research the next season", prompt)
+        self.assertIn("last two to three years", prompt)
+
+    def test_time_frame_is_stored_and_required(self):
+        cycle = Cycle.objects.create(name="Time frames")
+        stages.run_stage1(cycle, client=ScriptedClient())
+        self.assertEqual(
+            sorted(cycle.findings.values_list("timeframe", flat=True)),
+            ["both", "current", "current", "recurring"],
+        )
+        data = json.loads(dryrun.respond("research_trends", ""))
+        data["findings"][0]["timeframe"] = "probably recurring"
+        with self.assertRaises(schemas.SchemaError):
+            schemas.validate_findings(data)
 
     def test_urls_are_compared_without_scheme_or_trailing_slash(self):
         self.assertEqual(
@@ -496,6 +528,49 @@ class ScreenTests(TestCase):
         page = self.client.get(reverse("cycle_detail", args=[cycle.pk]))
         self.assertContains(page, "What the research found")
         self.assertContains(page, "Gate 1: your decision")
+
+    def test_season_is_saved_and_bad_values_are_refused(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="Season form")
+        url = reverse("save_direction", args=[cycle.pk])
+        year = str(timezone.localdate().year + 1)
+        self.client.post(url, {"direction": "", "season": "spring_summer", "season_year": year})
+        cycle.refresh_from_db()
+        self.assertEqual((cycle.season, cycle.season_year), ("spring_summer", int(year)))
+        self.client.post(url, {"direction": "", "season": "spring_summer", "season_year": "1999"})
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.season_year, int(year))  # unchanged
+        self.client.post(url, {"direction": "", "season": "monsoon", "season_year": ""})
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.season, "")
+        self.client.post(url, {"direction": "", "season": "year_round", "season_year": year})
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.season_label, "Year-round")
+        self.assertIsNone(cycle.season_year)
+
+    def test_research_button_uses_inputs_on_screen_without_a_separate_save(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="One click")
+        year = str(timezone.localdate().year + 1)
+        self.client.post(reverse("run_stage1", args=[cycle.pk]), {
+            "direction": "Bold mittens", "season": "autumn_winter", "season_year": year,
+        })
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.status, Cycle.Status.BRIEF_PENDING)
+        self.assertEqual(cycle.season_label, f"Autumn/Winter {year}")
+        prompt = ModelCall.objects.get(cycle=cycle, step="research_trends").prompt
+        self.assertIn("Bold mittens", prompt)
+        self.assertIn(f"Autumn/Winter {year}", prompt)
+
+    def test_research_does_not_run_on_an_invalid_year(self):
+        self.client.force_login(self.user)
+        cycle = Cycle.objects.create(name="Bad year")
+        self.client.post(reverse("run_stage1", args=[cycle.pk]), {
+            "direction": "", "season": "autumn_winter", "season_year": "1999",
+        })
+        cycle.refresh_from_db()
+        self.assertEqual(cycle.status, Cycle.Status.NEW)
+        self.assertEqual(ModelCall.objects.count(), 0)
 
     def test_direction_is_saved_then_locked(self):
         self.client.force_login(self.user)
