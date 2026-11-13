@@ -146,7 +146,7 @@ def describe_piece(piece: BakeoffPiece, client=None) -> dict:
         attempt_prompt = prompt if attempt == 0 else (
             prompt + "\n\nYour previous answer could not be used. Return the complete JSON and nothing else."
         )
-        result = client.complete("bakeoff_describe", attempt_prompt, model, 8000, images=images)
+        result = client.complete("bakeoff_describe", attempt_prompt, model, settings.FDW_MAX_OUTPUT_TOKENS, images=images)
         if not getattr(client, "dry_run", False):
             total_cost += cost_of(model, result.input_tokens, result.output_tokens)
         text = result.text

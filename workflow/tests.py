@@ -4,6 +4,7 @@ import json
 from decimal import Decimal
 from types import SimpleNamespace
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -521,8 +522,8 @@ class Stage2Tests(TestCase):
         stages.run_stage2(cycle, client=client)
         self.assertEqual(client.calls.count("plan_concepts"), 1)
         self.assertEqual(client.calls.count("detail_concept"), 3)
-        # No single answer is asked to hold three full collections.
-        self.assertLessEqual(max(client.max_tokens_seen), 12000)
+        # Every call uses the one configured ceiling, which leaves room for the model's reasoning.
+        self.assertEqual(set(client.max_tokens_seen), {settings.FDW_MAX_OUTPUT_TOKENS})
 
     def test_specified_concept_must_keep_the_planned_pieces(self):
         cycle = approved_cycle()

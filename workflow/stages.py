@@ -130,7 +130,7 @@ def run_research(cycle: Cycle, brand_brief: str, client) -> list:
         today=timezone.localdate().isoformat(),
     )
     result = run_result(
-        cycle, "research_trends", prompt, settings.FDW_MODEL_WRITER, 14000, client,
+        cycle, "research_trends", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS, client,
         web_search_max=settings.FDW_RESEARCH_MAX_SEARCHES,
     )
     try:
@@ -142,7 +142,7 @@ def run_research(cycle: Cycle, brand_brief: str, client) -> list:
             problems="\n".join(f"- {problem}" for problem in first.problems[:20]),
             previous_answer=result.text,
         )
-        text = run_call(cycle, "reformat_findings", reformat_prompt, settings.FDW_MODEL_WRITER, 14000, client)
+        text = run_call(cycle, "reformat_findings", reformat_prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS, client)
         try:
             data = schemas.validate_findings(parse_json(text))
         except schemas.SchemaError as second:
@@ -188,7 +188,7 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
         extracted.extend(
             run_json(
                 cycle, "extract_signals", prompt, settings.FDW_MODEL_EXTRACTOR,
-                8000, schemas.validate_signals, client,
+                settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_signals, client,
             )
         )
 
@@ -215,7 +215,7 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
     )
     allowed_urls = {schemas.normalise_url(f["source_url"]) for f in verified}
     brief_data = run_json(
-        cycle, "demand_brief", brief_prompt, settings.FDW_MODEL_WRITER, 9000,
+        cycle, "demand_brief", brief_prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
         lambda data: schemas.validate_brief(data, allowed_urls), client,
     )
     brief_text = brief_as_text(brief_data)
@@ -304,7 +304,7 @@ def _review(cycle, concept_data, brand_brief, brief_text, client):
     )
     review = run_json(
         cycle, "review_concept", prompt, settings.FDW_MODEL_WRITER,
-        3000, schemas.validate_review, client,
+        settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_review, client,
     )
     # Rules that must hold whatever the reviewer model concluded.
     code_issues = schemas.code_blocking_issues(concept_data)
@@ -338,7 +338,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
     )
     plans = run_json(
         cycle, "plan_concepts", plan_prompt, settings.FDW_MODEL_WRITER,
-        6000, schemas.validate_concept_plans, client,
+        settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_concept_plans, client,
     )
     generated = {"concepts": []}
     for plan in plans["concepts"]:
@@ -351,7 +351,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
         )
         generated["concepts"].append(
             run_json(
-                cycle, "detail_concept", detail_prompt, settings.FDW_MODEL_WRITER, 12000,
+                cycle, "detail_concept", detail_prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
                 lambda data, plan=plan: schemas.validate_concept_against_plan(data, plan), client,
             )
         )
@@ -370,7 +370,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
             )
             revised = run_json(
                 cycle, "revise_concept", revise_prompt, settings.FDW_MODEL_WRITER,
-                12000, schemas.validate_single_concept, client,
+                settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_single_concept, client,
             )
             # The revision must stay the same concept, whatever the model returned.
             revised["concept_id"] = concept_data["concept_id"]

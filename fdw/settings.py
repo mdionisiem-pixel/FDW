@@ -138,6 +138,14 @@ FDW_PRICES = {
     "claude-haiku-5-5": (Decimal("0.10"), Decimal("0.50")),
 }
 
+# Ceiling on output tokens for one model call. On current Claude models the
+# model's own reasoning counts toward this limit as well as the answer, so a
+# low ceiling cuts answers off. Anthropic's guidance (models docs, read
+# 13 November 2026) is 64,000 for agentic work; Sonnet 5.5 allows 128,000.
+# Only tokens actually produced are billed, and the cycle spend limit below
+# still stops the money.
+FDW_MAX_OUTPUT_TOKENS = int(os.environ.get("FDW_MAX_OUTPUT_TOKENS", "64000"))
+
 # Hard stop: no model call is made for a cycle once its recorded spend
 # reaches this amount.
 FDW_CYCLE_LIMIT_USD = Decimal(os.environ.get("FDW_CYCLE_LIMIT_USD", "5"))
