@@ -18,6 +18,9 @@ from .models import (
     Piece,
     RawItem,
     Signal,
+    SourcingCheck,
+    SourcingResult,
+    Supplier,
     TrendFinding,
 )
 
@@ -108,3 +111,27 @@ class BakeoffPieceAdmin(ReadOnlyAdmin):
 class BakeoffImageAdmin(ReadOnlyAdmin):
     list_display = ("piece", "shot", "code", "model", "status", "cost_usd", "matches_piece", "scored_at")
     list_filter = ("model", "status", "shot")
+
+
+@admin.register(Supplier)
+class SupplierAdmin(admin.ModelAdmin):
+    list_display = ("name", "route", "minimum_order", "lead_time", "checked_on", "active")
+    list_filter = ("route", "active")
+
+
+class SourcingResultInline(admin.TabularInline):
+    model = SourcingResult
+    extra = 0
+    can_delete = False
+    fields = ("piece", "route", "verdict", "unit_cost", "currency", "margin", "decision")
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(SourcingCheck)
+class SourcingCheckAdmin(ReadOnlyAdmin):
+    list_display = ("cycle", "status", "created_at", "decided_at")
+    list_filter = ("status",)
+    inlines = [SourcingResultInline]

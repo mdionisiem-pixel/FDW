@@ -1,16 +1,18 @@
-"""Screens for running a cycle: research the market, review the brief, pick a collection."""
+"""Screens for running a cycle: research, the brief, concepts, sourcing, and the supplier table."""
 from collections import Counter
 
 from django.conf import settings
+from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from . import charts, stages
 from .llm import StageError
-from .models import BrandBrief, Concept, Cycle, DemandBrief, RawItem
+from .models import BrandBrief, Concept, Cycle, DemandBrief, RawItem, SourcingCheck, SourcingResult, Supplier
 from .schemas import REVIEW_CRITERIA
 
 STAGES = [
@@ -22,7 +24,7 @@ STAGES = [
     (6, "Price test", "Waitlist with prices, then pre-orders"),
     (7, "Launch kit and learning", "Content, and results for next time"),
 ]
-BUILT_STAGES = 2
+BUILT_STAGES = 3
 
 CRITERION_LABELS = {
     "demand_evidence": "Demand evidence",
@@ -245,6 +247,7 @@ def cycle_detail(request, pk):
     brief = cycle.latest_brief
     findings = list(cycle.findings.all())
     cards = _concept_cards(cycle)
+    sourcing = cycle.sourcing_checks.exclude(status=SourcingCheck.Status.SUPERSEDED).first()
     pieces = [
         piece
         for concept in cycle.concepts.filter(status=Concept.Status.SELECTED)
@@ -280,6 +283,14 @@ def cycle_detail(request, pk):
         "brief_pending": bool(brief and brief.status == DemandBrief.Status.PENDING),
         "can_run_stage2": cycle.status == Cycle.Status.BRIEF_APPROVED,
         "concepts_pending": cycle.status == Cycle.Status.CONCEPTS_PENDING,
+        "sourcing": sourcing,
+        "sourcing_results": list(sourcing.results.select_related("piece")) if sourcing else [],
+        "sourcing_pending": bool(sourcing and sourcing.status == SourcingCheck.Status.PENDING
+                                 and cycle.status == Cycle.Status.SOURCING_PENDING),
+        "can_run_stage3": cycle.status in (Cycle.Status.CONCEPTS_SELECTED, Cycle.Status.SOURCING_PENDING),
+        "active_suppliers": Supplier.objects.filter(active=True).count(),
+        "decision_choices": [(v, l) for v, l in SourcingResult.Decision.choices if v],
+        "min_margin_percent": round(settings.FDW_MIN_GROSS_MARGIN * 100),
         "dry_run": settings.FDW_DRY_RUN,
     }
     return render(request, "workflow/cycle_detail.html", context)
@@ -400,3 +411,101 @@ def select_concepts(request, pk):
     except StageError as exc:
         messages.error(request, str(exc))
     return redirect("cycle_detail", pk=pk)
+
+
+@login_required
+@require_POST
+def run_stage3(request, pk):
+    cycle = get_object_or_404(Cycle, pk=pk)
+    try:
+        stages.run_stage3(cycle)
+        messages.success(request, "Sourcing sheet written. Decide on each piece below.")
+    except StageError as exc:
+        messages.error(request, str(exc))
+    return redirect(f"{reverse('cycle_detail', args=[pk])}#stage-3")
+
+
+@login_required
+@require_POST
+def decide_sourcing(request, pk):
+    cycle = get_object_or_404(Cycle, pk=pk)
+    check = cycle.sourcing_checks.filter(status=SourcingCheck.Status.PENDING).first()
+    if check is None:
+        messages.error(request, "There is no sourcing sheet awaiting a decision.")
+        return redirect("cycle_detail", pk=pk)
+    decisions = {
+        result.pk: request.POST.get(f"decision-{result.pk}", "")
+        for result in check.results.all()
+    }
+    try:
+        stages.decide_sourcing(check, decisions, request.POST.get("notes", ""), request.user.get_username())
+        messages.success(request, "Sourcing approved. Visual prototypes, stage 4, follow once the image test has picked a model.")
+    except StageError as exc:
+        messages.error(request, str(exc))
+    return redirect(f"{reverse('cycle_detail', args=[pk])}#stage-3")
+
+
+# --- Supplier table -------------------------------------------------------------
+
+
+class SupplierForm(forms.ModelForm):
+    class Meta:
+        model = Supplier
+        fields = [
+            "name", "route", "makes", "techniques", "materials", "limits", "minimum_order",
+            "lead_time", "prices", "price_currency", "location", "source_url", "checked_on",
+            "notes", "active",
+        ]
+        labels = {
+            "makes": "What it makes",
+            "minimum_order": "Minimum order",
+            "price_currency": "Price currency",
+            "source_url": "Source page",
+            "checked_on": "Checked on",
+            "active": "Use in sourcing checks",
+        }
+        widgets = {
+            "makes": forms.Textarea(attrs={"rows": 2}),
+            "techniques": forms.Textarea(attrs={"rows": 2}),
+            "materials": forms.Textarea(attrs={"rows": 2}),
+            "limits": forms.Textarea(attrs={"rows": 2}),
+            "prices": forms.Textarea(attrs={"rows": 2}),
+            "notes": forms.Textarea(attrs={"rows": 2}),
+            "checked_on": forms.DateInput(attrs={"type": "date"}),
+            "price_currency": forms.TextInput(attrs={"maxlength": 3, "size": 4}),
+        }
+
+    def clean_price_currency(self):
+        value = self.cleaned_data["price_currency"].strip().upper()
+        if len(value) != 3 or not value.isalpha():
+            raise forms.ValidationError("Use a three-letter code such as EUR or USD.")
+        return value
+
+
+@login_required
+def suppliers(request):
+    form = SupplierForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        supplier = form.save()
+        messages.success(request, f"Added {supplier.name}.")
+        return redirect("suppliers")
+    return render(request, "workflow/suppliers.html", {
+        "suppliers": Supplier.objects.all(),
+        "form": form,
+        "dry_run": settings.FDW_DRY_RUN,
+    })
+
+
+@login_required
+def edit_supplier(request, supplier_pk):
+    supplier = get_object_or_404(Supplier, pk=supplier_pk)
+    form = SupplierForm(request.POST or None, instance=supplier)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"Saved {supplier.name}. Run the sourcing check again to use the change.")
+        return redirect("suppliers")
+    return render(request, "workflow/supplier_edit.html", {
+        "supplier": supplier,
+        "form": form,
+        "dry_run": settings.FDW_DRY_RUN,
+    })

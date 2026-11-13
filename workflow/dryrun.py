@@ -413,6 +413,54 @@ def _revise(prompt: str) -> str:
     return json.dumps(concept)
 
 
+def _first_number(text: str):
+    match = re.search(r"\d+(?:\.\d+)?", str(text))
+    return float(match.group()) if match else None
+
+
+def _sourcing(prompt: str) -> str:
+    """A rule-based sourcing sheet: atelier pieces need no supplier; others take the first
+    supplier in the table on the same route, priced at the first number in its prices."""
+    try:
+        pieces = json.loads(_between(prompt, "piece_specifications"))
+    except json.JSONDecodeError:
+        return "{}"
+    try:
+        suppliers = json.loads(_between(prompt, "supplier_table"))
+    except json.JSONDecodeError:
+        suppliers = []
+    entries = []
+    for piece in pieces:
+        route = piece.get("production_route")
+        technique = str(piece.get("technique", "")).lower()
+        if route == "on_demand" and ("hand" in technique or "crochet" in technique):
+            route = "atelier"
+        entry = {
+            "piece_id": piece["piece_id"], "route": route, "status": "makeable_as_specified",
+            "changes": [], "candidate_suppliers": [], "unit_cost": None, "currency": "EUR",
+            "cost_basis": "Sample: Malina's own cost is not in the table." if route == "atelier" else "",
+            "margin_calc": "",
+            "questions_for_supplier": [] if route == "atelier" else ["Sample: what is the fibre content?"],
+        }
+        if route != "atelier":
+            match = next((sup for sup in suppliers if sup.get("route") == route), None)
+            if match is None:
+                entry["status"] = "needs_sourcing"
+                entry["cost_basis"] = f"Sample: no {route} supplier in the table."
+            else:
+                entry["candidate_suppliers"] = [{"name": match["name"], "changes_needed": "Sample: none checked."}]
+                cost = _first_number(match.get("prices", ""))
+                if cost:
+                    entry["unit_cost"] = cost
+                    entry["currency"] = match.get("price_currency", "EUR")
+                    entry["cost_basis"] = f"Sample, from the table: {match['prices']}"
+        entries.append(entry)
+    return json.dumps({
+        "pieces": entries,
+        "collection_summary": "Sample sourcing sheet written by the dry run from simple rules. It says nothing about real suppliers.",
+    })
+
+
 def respond(step: str, prompt: str) -> str:
     base = step.removesuffix("_retry")
     if base == "extract_signals":
@@ -445,4 +493,6 @@ def respond(step: str, prompt: str) -> str:
         return _review(prompt)
     if base == "revise_concept":
         return _revise(prompt)
+    if base == "sourcing_check":
+        return _sourcing(prompt)
     raise ValueError(f"No dry-run response is defined for step '{step}'.")
