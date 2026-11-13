@@ -1,3 +1,6 @@
 Django>=5.2,<6
 anthropic>=2.8,<3
 certifi>=2024.2.2
+# Photos for the image test: resize large photos, read iPhone HEIC files.
+Pillow>=11,<13
+pillow-heif>=1,<2

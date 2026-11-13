@@ -1,5 +1,6 @@
 """Tests for the image model bake-off."""
 import base64
+import io
 import json
 import shutil
 import tempfile
@@ -14,8 +15,15 @@ from . import bakeoff
 from .llm import DryRunClient, LLMResult
 from .models import BakeoffImage, BakeoffPiece
 
-PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
-JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+def _image_bytes(fmt, size=(8, 8), colour=(120, 30, 60)):
+    from PIL import Image
+    buffer = io.BytesIO()
+    Image.new("RGB", size, colour).save(buffer, fmt)
+    return buffer.getvalue()
+
+
+PNG = _image_bytes("PNG")
+JPEG = _image_bytes("JPEG")
 MEDIA = tempfile.mkdtemp(prefix="fdw-test-media-")
 
 
@@ -67,7 +75,7 @@ class BakeoffTests(TestCase):
     def test_photos_are_checked_by_content(self):
         with self.assertRaises(bakeoff.BakeoffError):
             bakeoff.check_photo(upload("fake.png", b"<html>not an image</html>"))
-        big = SimpleUploadedFile("big.png", PNG + b"\x00" * (5 * 1024 * 1024), content_type="image/png")
+        big = SimpleUploadedFile("big.png", PNG + b"\x00" * (50 * 1024 * 1024), content_type="image/png")
         with self.assertRaises(bakeoff.BakeoffError):
             bakeoff.check_photo(big)
         stored = bakeoff.check_photo(upload("anything.gif", JPEG))
@@ -78,7 +86,7 @@ class BakeoffTests(TestCase):
         client = RecordingClient()
         spec = bakeoff.describe_piece(p, client=client)
         self.assertEqual(len(client.images_seen), 3)
-        self.assertEqual(client.images_seen[0][0], "image/png")
+        self.assertEqual(client.images_seen[0][0], "image/jpeg")
         self.assertEqual(set(spec["prompts"]), {"A", "C", "D"})
 
     def test_queue_makes_one_job_per_model_and_shot_with_blind_codes(self):
@@ -270,3 +278,55 @@ class BakeoffScreenTests(TestCase):
         self.client.force_login(self.user)
         self.client.post(reverse("bakeoff_create"), {"name": "No photo"})
         self.assertEqual(BakeoffPiece.objects.count(), 0)
+
+
+
+class PhotoPreparationTests(TestCase):
+    """Large photos straight from a phone are accepted, turned upright, shrunk and cleaned."""
+
+    def _open(self, content_file):
+        from PIL import Image
+        return Image.open(io.BytesIO(content_file.read()))
+
+    def test_a_large_photo_is_scaled_to_the_long_edge_claude_reads(self):
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.effect_noise((6000, 4000), 60).convert("RGB").save(buffer, "JPEG", quality=95)
+        self.assertGreater(len(buffer.getvalue()), 5 * 1024 * 1024)  # bigger than the old limit
+        stored = bakeoff.check_photo(SimpleUploadedFile("camera.jpg", buffer.getvalue()))
+        self.assertLessEqual(stored.size, bakeoff.PHOTO_TARGET_BYTES)
+        image = self._open(stored)
+        self.assertEqual(image.format, "JPEG")
+        self.assertEqual(max(image.size), bakeoff.PHOTO_LONG_EDGE)
+
+    def test_a_sideways_phone_photo_is_turned_upright_and_location_removed(self):
+        from PIL import Image
+        exif = Image.Exif()
+        exif[0x0112] = 6  # orientation: rotate 90 degrees to display
+        exif[0x8825] = {1: "N", 2: (53.0, 20.0, 0.0)}  # GPS block
+        buffer = io.BytesIO()
+        Image.new("RGB", (400, 300), (10, 20, 30)).save(buffer, "JPEG", exif=exif)
+        image = self._open(bakeoff.check_photo(SimpleUploadedFile("phone.jpg", buffer.getvalue())))
+        self.assertEqual(image.size, (300, 400))
+        self.assertNotIn(0x8825, image.getexif())
+        self.assertNotIn(0x0112, image.getexif())
+
+    def test_a_transparent_png_gets_a_white_background(self):
+        from PIL import Image
+        buffer = io.BytesIO()
+        Image.new("RGBA", (20, 20), (0, 0, 0, 0)).save(buffer, "PNG")
+        image = self._open(bakeoff.check_photo(SimpleUploadedFile("cutout.png", buffer.getvalue())))
+        self.assertGreater(image.convert("RGB").getpixel((10, 10))[0], 240)
+
+    def test_an_iphone_heic_photo_is_accepted(self):
+        from PIL import Image
+        try:
+            import pillow_heif
+        except ImportError:
+            self.skipTest("pillow-heif is not installed")
+        pillow_heif.register_heif_opener()
+        buffer = io.BytesIO()
+        Image.new("RGB", (64, 48), (200, 50, 90)).save(buffer, "HEIF")
+        image = self._open(bakeoff.check_photo(SimpleUploadedFile("IMG_0001.HEIC", buffer.getvalue())))
+        self.assertEqual(image.format, "JPEG")
+        self.assertEqual(image.size, (64, 48))

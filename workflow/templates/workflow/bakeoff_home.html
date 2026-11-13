@@ -29,12 +29,12 @@
       <label for="piece-name">Name</label>
       <input id="piece-name" type="text" name="name" maxlength="120" placeholder="Rosehip cardigan" required>
       <div class="photo-inputs">
-        <div class="field"><label for="photo_front">Front photo, required</label><input id="photo_front" type="file" name="photo_front" accept="image/jpeg,image/png,image/webp" required></div>
-        <div class="field"><label for="photo_back">Back</label><input id="photo_back" type="file" name="photo_back" accept="image/jpeg,image/png,image/webp"></div>
-        <div class="field"><label for="photo_detail">Detail close-up</label><input id="photo_detail" type="file" name="photo_detail" accept="image/jpeg,image/png,image/webp"></div>
-        <div class="field"><label for="photo_worn">Worn</label><input id="photo_worn" type="file" name="photo_worn" accept="image/jpeg,image/png,image/webp"></div>
+        <div class="field"><label for="photo_front">Front photo, required</label><input id="photo_front" type="file" name="photo_front" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif" required></div>
+        <div class="field"><label for="photo_back">Back</label><input id="photo_back" type="file" name="photo_back" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"></div>
+        <div class="field"><label for="photo_detail">Detail close-up</label><input id="photo_detail" type="file" name="photo_detail" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"></div>
+        <div class="field"><label for="photo_worn">Worn</label><input id="photo_worn" type="file" name="photo_worn" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"></div>
       </div>
-      <p class="meta">JPEG, PNG or WebP, up to 5 MB each. Without a detail or worn photo, that shot is left out for this piece.</p>
+      <p class="meta">JPEG, PNG, WebP or HEIC, up to 50 MB each, straight from your phone or camera. Each photo is turned upright, made smaller and stored without its location data. Without a detail or worn photo, that shot is left out for this piece.</p>
       <label for="piece-notes">Facts the photos do not show, optional</label>
       <textarea id="piece-notes" name="notes" rows="2" placeholder="For example: 100% merino, hand-knit, size M, chest 52 cm."></textarea>
       <button class="btn btn-primary" type="submit">Add piece</button>
