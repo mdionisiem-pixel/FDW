@@ -26,4 +26,8 @@ urlpatterns = [
     path("cycles/<int:pk>/stage-1/decide/", views.decide_brief, name="decide_brief"),
     path("cycles/<int:pk>/stage-2/run/", views.run_stage2, name="run_stage2"),
     path("cycles/<int:pk>/stage-2/select/", views.select_concepts, name="select_concepts"),
+    path("cycles/<int:pk>/stage-3/run/", views.run_stage3, name="run_stage3"),
+    path("cycles/<int:pk>/stage-3/decide/", views.decide_sourcing, name="decide_sourcing"),
+    path("suppliers/", views.suppliers, name="suppliers"),
+    path("suppliers/<int:supplier_pk>/", views.edit_supplier, name="edit_supplier"),
 ]

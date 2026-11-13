@@ -3,13 +3,13 @@
 A Django application that researches what people are buying now and designs new
 collections from it. You approve every step.
 
-This is **slice 1** of the specification. It covers the first two of seven stages:
+This covers the first three of seven stages:
 
 | Stage | Status | What it does |
 | --- | --- | --- |
 | 1. Market research | Built | Researches the whole fashion market, compares the target season across earlier years with what is rising now, and builds a strategic report: headline and takeaways, an opportunity matrix, a timeline of each theme, reported growth figures, published forecasts, a category view, and recommendations. Nothing needs to be typed |
 | 2. Collection concepts | Built | Plans three new collections in one call, then specifies each in its own call so no answer is cut off; reviews each one separately; you pick one or two |
-| 3. Sourcing check | Not built | Slice 2 |
+| 3. Sourcing check | Built | Checks every approved piece against your supplier table: route, candidate suppliers, unit cost traced to a price you entered, gross margin worked out in code, and questions for the supplier. You decide per piece: continue, continue without a supplier (waitlist only), or drop |
 | 4. Visual prototypes | Not built | Slice 2 |
 | 5. 3D generation | Not built | Slice 3 |
 | 6. Price test | Not built | Slice 3 |

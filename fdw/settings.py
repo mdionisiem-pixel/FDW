@@ -153,6 +153,30 @@ FDW_SEARCH_PRICE_USD = Decimal(os.environ.get("FDW_SEARCH_PRICE_USD", "0.01"))
 FDW_RESEARCH_MAX_SEARCHES = int(os.environ.get("FDW_RESEARCH_MAX_SEARCHES", "12"))
 FDW_WEB_SEARCH_TOOL = os.environ.get("FDW_WEB_SEARCH_TOOL", "web_search_20250305")
 
+# --- Stage 3: sourcing check ------------------------------------------------
+
+# A piece whose gross margin falls below this share of its price is flagged
+# for the founder. A working assumption, not a rule from a source: change it
+# in .env to match Malina's own pricing.
+FDW_MIN_GROSS_MARGIN = Decimal(os.environ.get("FDW_MIN_GROSS_MARGIN", "0.5"))
+
+
+def _eur_rates(text: str) -> dict:
+    """Parse 'USD=0.86,GBP=1.17' into {'USD': Decimal('0.86'), ...}. EUR is always 1."""
+    rates = {"EUR": Decimal("1")}
+    for part in text.split(","):
+        code, _, value = part.partition("=")
+        code, value = code.strip().upper(), value.strip()
+        if code and value:
+            rates[code] = Decimal(value)
+    return rates
+
+
+# Euros per unit of each other currency, used only to compare a supplier's
+# price with a retail price in euros. No rate is built in, because a stale
+# rate would give a wrong margin; without one, the margin is left blank.
+FDW_EUR_RATES = _eur_rates(os.environ.get("FDW_EUR_RATES", ""))
+
 # --- Image generation (OpenRouter) and the image model bake-off ------------
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")

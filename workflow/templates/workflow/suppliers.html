@@ -1,0 +1,40 @@
+{% extends "workflow/base.html" %}
+{% load workflow_extras %}
+{% block title %}Suppliers | Malina studio{% endblock %}
+{% block content %}
+<section class="page">
+  <h1>Suppliers</h1>
+  <p class="lede">The sourcing check knows only what this table says. Enter facts as each supplier states them, with the page you read them on, and leave a field empty when it is not stated. An empty field is treated as unknown, never guessed.</p>
+
+  {% if suppliers %}
+    <div class="table-wrap">
+      <table class="approved suppliers-table">
+        <thead><tr><th>Supplier</th><th>Route</th><th>Makes</th><th>Minimum</th><th>Lead time</th><th>Prices</th><th>Checked</th><th></th></tr></thead>
+        <tbody>
+          {% for s in suppliers %}
+            <tr class="{% if not s.active %}is-inactive{% endif %}">
+              <td><strong>{{ s.name }}</strong>{% if s.location %} <span class="meta">{{ s.location }}</span>{% endif %}{% if not s.active %} <span class="meta">not used</span>{% endif %}</td>
+              <td>{{ s.route|route_name }}</td>
+              <td>{{ s.makes }}</td>
+              <td>{{ s.minimum_order|default:"Not stated" }}</td>
+              <td>{{ s.lead_time|default:"Not stated" }}</td>
+              <td>{% if s.prices %}{{ s.prices }} <span class="meta">{{ s.price_currency }}</span>{% else %}Not stated{% endif %}</td>
+              <td>{% if s.source_url %}<a href="{{ s.source_url }}" rel="noopener noreferrer" target="_blank">{{ s.checked_on|date:"j M Y"|default:"Source" }}</a>{% else %}{{ s.checked_on|date:"j M Y"|default:"Not recorded" }}{% endif %}</td>
+              <td><a class="link-btn" href="{% url 'edit_supplier' s.pk %}">Edit</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-inline"><p>No suppliers yet. Atelier pieces can still be checked; anything else will come back as needing a supplier.</p></div>
+  {% endif %}
+
+  <h2 class="section-title">Add a supplier</h2>
+  <p class="meta">Atelier pieces, made by hand by Malina, need no entry here.</p>
+  <form method="post" class="supplier-form">
+    {% include "workflow/includes/supplier_form.html" with wide_fields="makes techniques materials limits prices notes" %}
+    <div class="form-foot"><button class="btn btn-primary" type="submit">Add supplier</button></div>
+  </form>
+</section>
+{% endblock %}

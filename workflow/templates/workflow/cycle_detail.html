@@ -585,28 +585,118 @@
       {% endif %}
     </section>
 
-    {% if pieces %}
-      <section class="stage" id="approved" aria-labelledby="approved-title">
-        <h2 id="approved-title">Approved pieces</h2>
-        <p class="stage-intro">These specifications are now fixed. The sourcing check, stage 3, arrives in the next slice.</p>
-        <div class="table-wrap">
-          <table class="approved">
-            <thead><tr><th>Piece</th><th>Role</th><th>Tier</th><th>Made by</th><th class="num">Price</th></tr></thead>
-            <tbody>
-              {% for piece in pieces %}
-                <tr>
-                  <td><strong>{{ piece.name }}</strong> <span class="meta">{{ piece.piece_id }}</span></td>
-                  <td>{{ piece.role|label }}</td>
-                  <td><span class="piece-tier tier-{{ piece.production_route }}">{{ piece.tier }}</span></td>
-                  <td>{{ piece.production_route|route_name }}</td>
-                  <td class="num">€{{ piece.target_price_eur|floatformat:0 }}</td>
-                </tr>
+    <!-- Stage 3 -->
+    <section class="stage {% if cycle.stage_number < 3 %}stage-locked{% endif %}" id="stage-3" aria-labelledby="stage-3-title">
+      <h2 id="stage-3-title">Sourcing check</h2>
+      {% if cycle.stage_number < 3 %}
+        <p class="stage-intro">Unlocks when you select a collection.</p>
+      {% else %}
+        <p class="stage-intro">Each approved piece is checked against your <a href="{% url 'suppliers' %}">supplier table</a>: can it be made, by whom, and at what margin. The check uses only what the table says; a cost is kept only when it can be traced to a price you entered.</p>
+      {% endif %}
+
+      {% if pieces %}
+        <details class="fold" {% if not sourcing %}open{% endif %}>
+          <summary>Approved pieces ({{ pieces|length }})</summary>
+          <div class="table-wrap">
+            <table class="approved">
+              <thead><tr><th>Piece</th><th>Role</th><th>Tier</th><th>Made by</th><th class="num">Price</th></tr></thead>
+              <tbody>
+                {% for piece in pieces %}
+                  <tr>
+                    <td><strong>{{ piece.name }}</strong> <span class="meta">{{ piece.piece_id }}</span></td>
+                    <td>{{ piece.role|label }}</td>
+                    <td><span class="piece-tier tier-{{ piece.production_route }}">{{ piece.tier }}</span></td>
+                    <td>{{ piece.production_route|route_name }}</td>
+                    <td class="num">€{{ piece.target_price_eur|floatformat:0 }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      {% endif %}
+
+      {% if can_run_stage3 %}
+        <form method="post" action="{% url 'run_stage3' cycle.pk %}" data-working="Checking every piece against your supplier table" class="run-row">
+          {% csrf_token %}
+          <button class="btn{% if not sourcing_pending %} btn-primary{% endif %}" type="submit">{% if sourcing %}Run the sourcing check again{% else %}Run the sourcing check{% endif %}</button>
+          <p class="meta">{{ active_suppliers }} active supplier{{ active_suppliers|pluralize }} in your table.{% if sourcing_pending %} Run it again after adding or correcting a supplier; this sheet is then kept in the record as replaced.{% endif %}</p>
+        </form>
+      {% endif %}
+
+      {% if sourcing %}
+        <div class="sourcing">
+          <div class="brief-head">
+            <p class="stamp stamp-{% if sourcing.status == 'approved' %}approved{% else %}pending{% endif %}">{{ sourcing.get_status_display }}</p>
+            <p class="meta">Written {{ sourcing.created_at|date:"j M Y, H:i" }} from {{ sourcing.suppliers_sent|length }} supplier{{ sourcing.suppliers_sent|length|pluralize }}</p>
+          </div>
+          <p class="sourcing-summary">{{ sourcing.summary }}</p>
+
+          <form method="post" action="{% url 'decide_sourcing' cycle.pk %}">
+            {% csrf_token %}
+            <ol class="sourcing-list">
+              {% for r in sourcing_results %}
+                <li class="sourcing-piece verdict-{{ r.verdict }}">
+                  <div class="sourcing-head">
+                    <h3>{{ r.piece.name }} <span class="meta">{{ r.piece.piece_id }}</span></h3>
+                    <p class="stamp {% if r.verdict == 'makeable_as_specified' %}stamp-ok{% elif r.verdict == 'makeable_with_changes' %}stamp-pending{% else %}stamp-rejected{% endif %}">{{ r.get_verdict_display }}</p>
+                  </div>
+                  <dl class="sourcing-facts">
+                    <div><dt>Made by</dt><dd>{{ r.route|route_name }}</dd></div>
+                    <div><dt>Price</dt><dd>€{{ r.piece.target_price_eur|floatformat:0 }}</dd></div>
+                    <div><dt>Unit cost</dt><dd>{% if r.unit_cost is not None %}{{ r.unit_cost }} {{ r.currency }}{% else %}Unknown{% endif %}</dd></div>
+                    <div><dt>Gross margin</dt><dd>{% if r.margin_percent is not None %}<strong class="{% if r.margin_percent < min_margin_percent %}low{% endif %}">{{ r.margin_percent }}%</strong>{% else %}Unknown{% endif %}</dd></div>
+                  </dl>
+                  {% if r.candidate_suppliers %}
+                    <h4>Suppliers that could make it</h4>
+                    <ul class="plain">
+                      {% for c in r.candidate_suppliers %}<li><strong>{{ c.name }}</strong>{% if c.changes_needed %}: {{ c.changes_needed }}{% endif %}</li>{% endfor %}
+                    </ul>
+                  {% endif %}
+                  {% if r.changes %}
+                    <div class="issues"><h4>Changes to the specification</h4><ul>{% for c in r.changes %}<li>{{ c }}</li>{% endfor %}</ul></div>
+                  {% endif %}
+                  {% if r.warnings %}
+                    <div class="issues issues-blocking"><h4>Check before deciding</h4><ul>{% for w in r.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>
+                  {% endif %}
+                  {% if r.questions %}
+                    <details class="fold"><summary>Questions to ask the supplier ({{ r.questions|length }})</summary><ul class="plain">{% for q in r.questions %}<li>{{ q }}</li>{% endfor %}</ul></details>
+                  {% endif %}
+                  {% if r.cost_basis %}<p class="meta">Cost basis: {{ r.cost_basis }}</p>{% endif %}
+
+                  {% if sourcing_pending %}
+                    <fieldset class="decide">
+                      <legend>Your decision on {{ r.piece.name }}</legend>
+                      {% for value, text in decision_choices %}
+                        {% if value == 'accept_risk' and r.verdict != 'needs_sourcing' %}{% elif value == 'approved' and r.verdict == 'needs_sourcing' %}{% else %}
+                          <label class="pick"><input type="radio" name="decision-{{ r.pk }}" value="{{ value }}" required> <span>{% if value == 'approved' and r.verdict == 'makeable_with_changes' %}Continue, with these changes{% else %}{{ text }}{% endif %}</span></label>
+                        {% endif %}
+                      {% endfor %}
+                    </fieldset>
+                  {% elif r.decision %}
+                    <p class="stamp {% if r.decision == 'dropped' %}stamp-not_selected{% elif r.decision == 'accept_risk' %}stamp-pending{% else %}stamp-approved{% endif %}">{{ r.get_decision_display }}</p>
+                  {% endif %}
+                </li>
               {% endfor %}
-            </tbody>
-          </table>
+            </ol>
+
+            {% if sourcing_pending %}
+              <div class="gate">
+                <h3>Gate 3: your decision</h3>
+                <p>Decide on every piece. Accepted changes travel with the piece to images and page copy. A piece without a supplier can continue only if you accept the risk, and then only to the waitlist.</p>
+                <label for="sourcing-notes">Notes</label>
+                <textarea id="sourcing-notes" name="notes" rows="2" placeholder="Anything to remember when you contact suppliers."></textarea>
+                <div class="gate-actions">
+                  <button class="btn btn-primary" type="submit">Approve sourcing sheet</button>
+                </div>
+              </div>
+            {% elif sourcing.status == 'approved' %}
+              <p class="stage-intro">Visual prototypes, stage 4, are built after the image test on the Image test page has picked a model.</p>
+            {% endif %}
+          </form>
         </div>
-      </section>
-    {% endif %}
+      {% endif %}
+    </section>
 
     <section class="stage stage-quiet" id="activity" aria-labelledby="activity-title">
       <h2 id="activity-title">Record</h2>

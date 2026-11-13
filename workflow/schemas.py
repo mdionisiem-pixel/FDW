@@ -527,3 +527,165 @@ def code_blocking_issues(concept) -> list:
                 f"{label}: described as handmade, but only atelier pieces may be called handmade."
             )
     return issues
+
+
+# --- Stage 3: sourcing check -------------------------------------------------
+
+SOURCING_STATUSES = ("makeable_as_specified", "makeable_with_changes", "needs_sourcing")
+CURRENCY = re.compile(r"^[A-Z]{3}$")
+
+
+def _hand_technique(technique) -> bool:
+    text = str(technique or "").lower()
+    return "hand" in text or "crochet" in text
+
+
+def validate_sourcing(data, pieces, suppliers):
+    """Validate the sourcing check against the pieces and the supplier table it was given.
+
+    ``pieces`` maps piece_id to the piece specification. ``suppliers`` is the
+    list of supplier dictionaries that were sent. A supplier the table does
+    not contain, a piece left out, or a hand technique given to a machine
+    supplier is sent back to the model to correct.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("pieces"), list):
+        raise SchemaError(['Expected an object with a "pieces" list.'])
+    problems = []
+    if not _is_text(data.get("collection_summary")):
+        problems.append("collection_summary is missing or empty")
+    routes_by_name = {s["name"].strip().lower(): s["route"] for s in suppliers}
+    seen = []
+    for i, item in enumerate(data["pieces"]):
+        where = f"piece entry {i + 1}"
+        if not isinstance(item, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        piece_id = item.get("piece_id")
+        if piece_id not in pieces:
+            problems.append(f"{where}: piece_id {piece_id!r} is not one of the approved pieces {sorted(pieces)}")
+            continue
+        where = f"piece {piece_id}"
+        seen.append(piece_id)
+        route = item.get("route")
+        status = item.get("status")
+        if route not in ROUTES:
+            problems.append(f"{where}: route must be one of {sorted(ROUTES)}")
+        if status not in SOURCING_STATUSES:
+            problems.append(f"{where}: status must be one of {list(SOURCING_STATUSES)}")
+        if route == "on_demand" and _hand_technique(pieces[piece_id].get("technique")):
+            problems.append(
+                f"{where}: the technique '{pieces[piece_id].get('technique')}' cannot be made by an "
+                "on-demand machine supplier; use atelier or specialist"
+            )
+        changes = item.get("changes")
+        if not _string_list(changes):
+            problems.append(f"{where}: changes must be a list of strings")
+        elif status == "makeable_with_changes" and not [c for c in changes if c.strip()]:
+            problems.append(f"{where}: makeable_with_changes must list the changes")
+        if not _string_list(item.get("questions_for_supplier")):
+            problems.append(f"{where}: questions_for_supplier must be a list of strings")
+        candidates = item.get("candidate_suppliers")
+        if not isinstance(candidates, list):
+            problems.append(f"{where}: candidate_suppliers must be a list")
+            candidates = []
+        matching_route = 0
+        for candidate in candidates:
+            name = candidate.get("name") if isinstance(candidate, dict) else None
+            if not _is_text(name):
+                problems.append(f"{where}: every candidate supplier needs a name")
+                continue
+            table_route = routes_by_name.get(name.strip().lower())
+            if table_route is None:
+                problems.append(
+                    f"{where}: supplier {name!r} is not in the supplier table; name only suppliers "
+                    "from the table, written exactly as there"
+                )
+            elif table_route == route:
+                matching_route += 1
+        if route == "atelier" and candidates:
+            problems.append(f"{where}: an atelier piece is made by Malina, so candidate_suppliers must be empty")
+        if route in ("on_demand", "specialist") and status in SOURCING_STATUSES[:2] and not matching_route:
+            problems.append(
+                f"{where}: a {route} piece can only be {status} if a supplier in the table with route "
+                f"{route} can make it; otherwise use needs_sourcing"
+            )
+        cost = item.get("unit_cost")
+        if cost is not None and (not _is_number(cost) or cost <= 0):
+            problems.append(f"{where}: unit_cost must be null or a number above zero")
+        if cost is not None and not CURRENCY.match(str(item.get("currency") or "")):
+            problems.append(f"{where}: currency must be a three-letter code such as EUR when unit_cost is given")
+    missing = sorted(set(pieces) - set(seen))
+    if missing:
+        problems.append(f"every approved piece needs exactly one entry; missing: {missing}")
+    duplicates = sorted({p for p in seen if seen.count(p) > 1})
+    if duplicates:
+        problems.append(f"each piece must appear once; repeated: {duplicates}")
+    if problems:
+        raise SchemaError(problems)
+    return data
+
+
+def sourcing_code_checks(item, piece, suppliers, eur_rates, min_margin):
+    """Rules applied in code to one validated sourcing entry, whatever the model concluded.
+
+    The unit cost is kept only if the number is written in the price text of
+    a supplier the model named; the margin is computed here, never taken from
+    the model; and anything the founder should know is returned as a warning.
+
+    Returns a dict with unit_cost, currency, margin and warnings.
+    """
+    from decimal import Decimal, ROUND_HALF_UP
+
+    warnings = []
+    named = {
+        c["name"].strip().lower()
+        for c in item.get("candidate_suppliers", [])
+        if isinstance(c, dict) and _is_text(c.get("name"))
+    }
+    named_suppliers = [s for s in suppliers if s["name"].strip().lower() in named]
+
+    unit_cost, currency = None, ""
+    cost = item.get("unit_cost")
+    if cost is not None:
+        source = next((s for s in named_suppliers if number_in_text(cost, s["prices"])), None)
+        if source is None:
+            warnings.append(
+                f"The model gave a unit cost of {cost} {item.get('currency', '')}, but that number is not in "
+                "the price of any supplier it named, so it was not used."
+            )
+        else:
+            unit_cost = Decimal(str(cost)).quantize(Decimal("0.01"))
+            currency = source["price_currency"]
+
+    price = Decimal(str(piece["target_price_eur"]))
+    margin = None
+    if unit_cost is not None:
+        rate = eur_rates.get(currency)
+        if rate is None:
+            warnings.append(
+                f"The cost is in {currency} and no exchange rate is set, so the margin was not worked out. "
+                f"Add {currency} to FDW_EUR_RATES to see it."
+            )
+        elif price > 0:
+            margin = ((price - unit_cost * rate) / price).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+            if margin <= 0:
+                warnings.append("At this cost the piece sells at a loss.")
+            elif margin < min_margin:
+                warnings.append(
+                    f"Gross margin of {round(margin * 100)}% is below your {round(min_margin * 100)}% threshold. "
+                    "Shipping, payment fees and returns are not included."
+                )
+    elif item.get("route") in ("on_demand", "specialist") and item.get("status") != "needs_sourcing":
+        warnings.append("No unit cost could be traced to the supplier table, so the margin is unknown.")
+
+    specified = piece.get("production_route")
+    if item.get("route") != specified:
+        warnings.append(f"Route changed from {specified} to {item.get('route')}.")
+        if specified == "atelier" and HANDMADE_WORDS.search(_piece_text(piece)):
+            warnings.append("The specification calls the piece handmade, which will no longer be true.")
+    if item.get("status") == "needs_sourcing":
+        warnings.append(
+            "No supplier in your table can make this. It can go on to images only if you accept the risk, "
+            "and then only to the waitlist until a supplier is confirmed."
+        )
+    return {"unit_cost": unit_cost, "currency": currency, "margin": margin, "warnings": warnings}

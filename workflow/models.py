@@ -71,6 +71,8 @@ class Cycle(models.Model):
         BRIEF_REJECTED = "brief_rejected", "Research brief rejected"
         CONCEPTS_PENDING = "concepts_pending", "Concepts awaiting selection"
         CONCEPTS_SELECTED = "concepts_selected", "Collection selected"
+        SOURCING_PENDING = "sourcing_pending", "Sourcing sheet awaiting approval"
+        SOURCING_APPROVED = "sourcing_approved", "Sourcing approved"
 
     name = models.CharField(max_length=120)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.NEW)
@@ -114,12 +116,22 @@ class Cycle(models.Model):
 
     @property
     def stage_number(self) -> int:
-        """Which of the seven stages the cycle is in (slice 1 covers 1 and 2)."""
+        """Which of the seven stages the cycle is in."""
         if self.status in (self.Status.NEW, self.Status.BRIEF_PENDING, self.Status.BRIEF_REJECTED):
             return 1
         if self.status in (self.Status.BRIEF_APPROVED, self.Status.CONCEPTS_PENDING):
             return 2
-        return 3
+        if self.status in (self.Status.CONCEPTS_SELECTED, self.Status.SOURCING_PENDING):
+            return 3
+        return 4
+
+    @property
+    def selected_pieces(self):
+        return Piece.objects.filter(concept__cycle=self, concept__status=Concept.Status.SELECTED)
+
+    @property
+    def latest_sourcing(self):
+        return self.sourcing_checks.order_by("-created_at", "-id").first()
 
 
 class RawItem(models.Model):
@@ -331,6 +343,143 @@ class ModelCall(models.Model):
 
     def __str__(self):
         return f"{self.step} ({self.model})"
+
+
+# --- Stage 3: sourcing check -------------------------------------------------
+
+
+class Supplier(models.Model):
+    """One supplier the founder has looked up. The sourcing check uses no other supplier facts.
+
+    Every field is something the founder read on the supplier's own page or
+    heard from the supplier. Leave a field empty rather than guess: the
+    sourcing check is told to treat an empty field as unknown.
+    """
+
+    class Route(models.TextChoices):
+        ON_DEMAND = "on_demand", "On-demand supplier"
+        SPECIALIST = "specialist", "Specialist manufacturer"
+
+    name = models.CharField(max_length=120, unique=True)
+    route = models.CharField(max_length=12, choices=Route.choices)
+    makes = models.TextField(help_text="Product types and categories the supplier states it makes.")
+    techniques = models.TextField(blank=True, help_text="Techniques and machines, for example 4-colour jacquard knit, cut and sew.")
+    materials = models.TextField(blank=True, help_text="Fibres and fabrics offered, as stated. Empty means not stated.")
+    limits = models.TextField(blank=True, help_text="Colour limits, size range, anything it cannot do.")
+    minimum_order = models.CharField(max_length=120, blank=True)
+    lead_time = models.CharField(max_length=120, blank=True)
+    prices = models.TextField(blank=True, help_text="Unit prices as stated, with what they are for. Empty means not stated.")
+    price_currency = models.CharField(max_length=3, default="EUR")
+    location = models.CharField(max_length=120, blank=True)
+    source_url = models.URLField(max_length=500, blank=True)
+    checked_on = models.DateField(null=True, blank=True, help_text="When you last read the source.")
+    notes = models.TextField(blank=True)
+    active = models.BooleanField(default=True, help_text="Only active suppliers are sent to the sourcing check.")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["route", "name"]
+
+    def __str__(self):
+        return self.name
+
+    def as_prompt_data(self) -> dict:
+        """The supplier as the sourcing check sees it. Empty fields are sent as 'not stated'."""
+        def value(text):
+            return text.strip() if text and text.strip() else "not stated"
+
+        return {
+            "name": self.name,
+            "route": self.route,
+            "makes": value(self.makes),
+            "techniques": value(self.techniques),
+            "materials": value(self.materials),
+            "limits": value(self.limits),
+            "minimum_order": value(self.minimum_order),
+            "lead_time": value(self.lead_time),
+            "prices": value(self.prices),
+            "price_currency": self.price_currency,
+            "location": value(self.location),
+            "checked_on": self.checked_on.isoformat() if self.checked_on else "not stated",
+        }
+
+
+class SourcingCheck(models.Model):
+    """One run of the sourcing check for a cycle's approved pieces."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Awaiting your decision"
+        APPROVED = "approved", "Approved"
+        SUPERSEDED = "superseded", "Replaced by a later check"
+
+    cycle = models.ForeignKey(Cycle, on_delete=models.CASCADE, related_name="sourcing_checks")
+    status = models.CharField(max_length=12, choices=Status.choices, default=Status.PENDING)
+    summary = models.TextField()
+    # The supplier table exactly as it was sent, so the result can be traced
+    # even after the founder edits a supplier.
+    suppliers_sent = models.JSONField(default=list)
+    founder_notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"Sourcing check for {self.cycle} ({self.get_status_display()})"
+
+
+class SourcingResult(models.Model):
+    """The sourcing verdict for one piece, and the founder's decision on it."""
+
+    class Verdict(models.TextChoices):
+        AS_SPECIFIED = "makeable_as_specified", "Makeable as specified"
+        WITH_CHANGES = "makeable_with_changes", "Makeable with changes"
+        NEEDS_SOURCING = "needs_sourcing", "Needs a supplier"
+
+    class Decision(models.TextChoices):
+        UNDECIDED = "", "Not decided"
+        APPROVED = "approved", "Continue"
+        ACCEPT_RISK = "accept_risk", "Continue without a supplier (waitlist only)"
+        DROPPED = "dropped", "Drop from the collection"
+
+    sourcing_check = models.ForeignKey(SourcingCheck, on_delete=models.CASCADE, related_name="results")
+    piece = models.ForeignKey(Piece, on_delete=models.CASCADE, related_name="sourcing_results")
+    route = models.CharField(max_length=12)
+    verdict = models.CharField(max_length=24, choices=Verdict.choices)
+    changes = models.JSONField(default=list, blank=True)
+    candidate_suppliers = models.JSONField(default=list, blank=True)
+    questions = models.JSONField(default=list, blank=True)
+    # Unit cost and margin are kept only when code could trace the cost to a
+    # price in the supplier table; the model's own arithmetic is kept as text.
+    unit_cost = models.DecimalField(max_digits=9, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=3, blank=True)
+    cost_basis = models.TextField(blank=True)
+    margin = models.DecimalField(max_digits=5, decimal_places=3, null=True, blank=True)
+    warnings = models.JSONField(default=list, blank=True)
+    decision = models.CharField(max_length=12, choices=Decision.choices, blank=True, default="")
+
+    class Meta:
+        ordering = ["piece__piece_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["sourcing_check", "piece"], name="one_result_per_piece_per_check"),
+        ]
+
+    def __str__(self):
+        return f"{self.piece}: {self.get_verdict_display()}"
+
+    @property
+    def margin_percent(self):
+        return None if self.margin is None else round(self.margin * 100)
+
+    @property
+    def continues(self) -> bool:
+        return self.decision in (self.Decision.APPROVED, self.Decision.ACCEPT_RISK)
+
+    @property
+    def waitlist_only(self) -> bool:
+        """A piece without a confirmed supplier may be shown, but never pre-sold."""
+        return self.decision == self.Decision.ACCEPT_RISK
 
 
 # --- Image model bake-off ------------------------------------------------------

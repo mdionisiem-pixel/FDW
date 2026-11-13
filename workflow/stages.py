@@ -1,4 +1,4 @@
-"""Stage logic and approval gates for stages 1 and 2.
+"""Stage logic and approval gates for stages 1 to 3.
 
 The order of work is fixed in code. A stage refuses to run unless the gate
 before it has an explicit approval, so nothing depends on a model choosing to
@@ -23,6 +23,9 @@ from .models import (
     DemandBrief,
     Piece,
     Signal,
+    SourcingCheck,
+    SourcingResult,
+    Supplier,
     TrendFinding,
 )
 
@@ -436,3 +439,117 @@ def select_concepts(cycle: Cycle, concept_pks, notes: str = "", user: str = "") 
             decision="selected", notes=notes.strip(), decided_by=user,
         )
     return pieces
+
+
+# --- Stage 3: sourcing check --------------------------------------------------
+
+
+def run_stage3(cycle: Cycle, client=None) -> SourcingCheck:
+    """Check every approved piece against the founder's supplier table.
+
+    It may run again while the sheet awaits a decision, for example after the
+    founder adds a supplier; the earlier sheet is then kept as superseded.
+    """
+    if cycle.status not in (Cycle.Status.CONCEPTS_SELECTED, Cycle.Status.SOURCING_PENDING):
+        raise GateError("Stage 3 needs a selected collection. Pick one or two concepts at gate 2 first.")
+    pieces = list(cycle.selected_pieces.order_by("piece_id"))
+    if not pieces:
+        raise StageError("The selected collection has no pieces to check.")
+    suppliers = [s.as_prompt_data() for s in Supplier.objects.filter(active=True)]
+    client = client or get_client()
+
+    specs = {p.piece_id: p.spec for p in pieces}
+    prompt = prompts.render(
+        prompts.SOURCING_CHECK,
+        approved_pieces_json=json.dumps([p.spec for p in pieces], ensure_ascii=False, indent=1),
+        supplier_table_json=json.dumps(suppliers, ensure_ascii=False, indent=1)
+        if suppliers else "[] (the table is empty: no supplier has been added yet)",
+    )
+    data = run_json(
+        cycle, "sourcing_check", prompt, settings.FDW_MODEL_WRITER, 12000,
+        lambda d: schemas.validate_sourcing(d, specs, suppliers), client,
+    )
+    entries = {item["piece_id"]: item for item in data["pieces"]}
+
+    with transaction.atomic():
+        cycle.sourcing_checks.filter(status=SourcingCheck.Status.PENDING).update(
+            status=SourcingCheck.Status.SUPERSEDED
+        )
+        check = SourcingCheck.objects.create(
+            cycle=cycle, summary=str(data["collection_summary"]), suppliers_sent=suppliers,
+        )
+        for piece in pieces:
+            item = entries[piece.piece_id]
+            checked = schemas.sourcing_code_checks(
+                item, piece.spec, suppliers, settings.FDW_EUR_RATES, settings.FDW_MIN_GROSS_MARGIN,
+            )
+            SourcingResult.objects.create(
+                sourcing_check=check,
+                piece=piece,
+                route=item["route"],
+                verdict=item["status"],
+                changes=[c for c in item["changes"] if c.strip()],
+                candidate_suppliers=[
+                    {"name": str(c["name"]), "changes_needed": str(c.get("changes_needed") or "")}
+                    for c in item["candidate_suppliers"]
+                ],
+                questions=[q for q in item["questions_for_supplier"] if q.strip()],
+                unit_cost=checked["unit_cost"],
+                currency=checked["currency"],
+                cost_basis=str(item.get("cost_basis") or "")[:2000]
+                + (f" Model's arithmetic: {item['margin_calc']}" if item.get("margin_calc") else ""),
+                margin=checked["margin"],
+                warnings=checked["warnings"],
+            )
+        cycle.status = Cycle.Status.SOURCING_PENDING
+        cycle.save(update_fields=["status"])
+    return check
+
+
+def decide_sourcing(check: SourcingCheck, decisions: dict, notes: str = "", user: str = "") -> SourcingCheck:
+    """Gate 3. The founder decides on every piece: continue, continue at risk, or drop.
+
+    ``decisions`` maps a SourcingResult primary key to a decision value. A
+    piece with no supplier cannot simply continue; the founder must accept
+    the risk explicitly, and it is then held to the waitlist.
+    """
+    if check.status != SourcingCheck.Status.PENDING or check.cycle.status != Cycle.Status.SOURCING_PENDING:
+        raise GateError("This sourcing sheet is not awaiting a decision.")
+    results = list(check.results.select_related("piece"))
+    problems = []
+    chosen = {}
+    allowed = {value for value, _ in SourcingResult.Decision.choices if value}
+    for result in results:
+        decision = decisions.get(result.pk) or decisions.get(str(result.pk)) or ""
+        name = f"{result.piece.piece_id} {result.piece.name}"
+        if decision not in allowed:
+            problems.append(f"Choose what happens to {name}.")
+        elif decision == SourcingResult.Decision.APPROVED and result.verdict == SourcingResult.Verdict.NEEDS_SOURCING:
+            problems.append(f"{name} has no supplier. Accept the risk explicitly, or drop it.")
+        elif decision == SourcingResult.Decision.ACCEPT_RISK and result.verdict != SourcingResult.Verdict.NEEDS_SOURCING:
+            problems.append(f"{name} has a supplier; choose Continue instead.")
+        chosen[result.pk] = decision
+    if problems:
+        raise StageError(" ".join(problems))
+    if all(d == SourcingResult.Decision.DROPPED for d in chosen.values()):
+        raise StageError("Every piece would be dropped. Keep at least one, or run stage 2 again in a new cycle.")
+    cycle = check.cycle
+    with transaction.atomic():
+        for result in results:
+            result.decision = chosen[result.pk]
+            result.save(update_fields=["decision"])
+        check.status = SourcingCheck.Status.APPROVED
+        check.founder_notes = notes.strip()
+        check.decided_at = timezone.now()
+        check.save(update_fields=["status", "founder_notes", "decided_at"])
+        cycle.status = Cycle.Status.SOURCING_APPROVED
+        cycle.save(update_fields=["status"])
+        counts = {label: sum(1 for d in chosen.values() if d == value)
+                  for value, label in SourcingResult.Decision.choices if value}
+        Approval.objects.create(
+            cycle=cycle, stage=3, item=f"Sourcing sheet #{check.pk}", decision="approved",
+            notes="; ".join(f"{label}: {n}" for label, n in counts.items() if n)
+            + (f". {notes.strip()}" if notes.strip() else ""),
+            decided_by=user,
+        )
+    return check

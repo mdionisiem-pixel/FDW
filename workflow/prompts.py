@@ -343,6 +343,55 @@ Return JSON only: the single corrected concept object, with this structure:
 </issues_to_fix>"""
 
 
+SOURCING_CHECK = """You are checking whether the pieces in an approved Malina collection can be produced. Malina will show these pieces to buyers before they exist, so a piece that cannot be made as specified, or cannot be made at a cost that leaves a margin, must be caught now, while it is still cheap to change.
+
+You have the approved piece specifications and Malina's supplier table. The supplier table is the only source of supplier facts. The founder filled it in from each supplier's own page, and a field that says "not stated" is unknown. Do not use anything you believe you know about a supplier that is not in the table, and do not invent prices, lead times, materials or capabilities. If the table does not answer a question, say so and put the question in questions_for_supplier.
+
+The three production routes:
+- atelier: made by hand by Malina. Needs no supplier. Malina's own cost is not in the table, so unit_cost is null.
+- on_demand: made one at a time by a supplier in the table whose route is on_demand.
+- specialist: made in small runs by a supplier in the table whose route is specialist.
+
+For each piece, in this order:
+1. Confirm or correct the production route. A piece specified as hand embroidery, crochet or hand knitting can only be atelier or specialist; an on-demand machine supplier cannot make it. A jacquard design with more colours than a supplier allows must be simplified or moved.
+2. Name the suppliers in the table that could make it, using their names exactly as written in the table, and say what in the specification would have to change for each. For an atelier piece the list is empty.
+3. Estimate the unit cost only from a price written in the table, and copy that price exactly as a number. If a range is given, use its upper end, because a margin worked out on the low end may not survive the real quote. Give the currency the table states. If the table gives no price for this kind of product, unit_cost is null.
+4. Show the margin arithmetic in words when both a cost and the target price exist: (target price minus unit cost) divided by target price. If the currencies differ, say so instead of converting, because you have no exchange rate. The app recomputes the margin itself.
+5. Give a status:
+   - makeable_as_specified: a route and, for on_demand or specialist, a supplier in the table can make the piece exactly as specified.
+   - makeable_with_changes: it can be made if the specification changes. List every change in changes, specifically enough that the specification could be edited from your words alone.
+   - needs_sourcing: no supplier in the table can make it. Malina must find one before taking money for it.
+6. List questions_for_supplier: what the founder must ask before ordering a sample, such as fibre content, colour limits, sizes, finishing, and whether a concept image can be matched.
+
+Flag any piece where the specification promises something no supplier in the table can be shown to deliver, such as a fibre, a finish or a construction, because that gap later becomes a broken promise to a buyer.
+
+Return JSON only, one entry for every piece, in this structure:
+{
+  "pieces": [
+    {
+      "piece_id": "",
+      "route": "atelier | on_demand | specialist",
+      "status": "makeable_as_specified | makeable_with_changes | needs_sourcing",
+      "changes": ["each change to the specification"],
+      "candidate_suppliers": [{"name": "exactly as in the table", "changes_needed": ""}],
+      "unit_cost": null,
+      "currency": "EUR",
+      "cost_basis": "the exact price text from the table the cost came from, or why there is none",
+      "margin_calc": "",
+      "questions_for_supplier": []
+    }
+  ],
+  "collection_summary": "three short sentences for the founder: what can be made now, what needs changes, what needs a supplier"
+}
+
+<piece_specifications>
+{{approved_pieces_json}}
+</piece_specifications>
+<supplier_table>
+{{supplier_table_json}}
+</supplier_table>"""
+
+
 _SLOT = re.compile(r"\{\{([a-z0-9_]+)\}\}")
 
 

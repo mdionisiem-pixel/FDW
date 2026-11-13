@@ -1,0 +1,16 @@
+{% extends "workflow/base.html" %}
+{% block title %}{{ supplier.name }} | Malina studio{% endblock %}
+{% block content %}
+<section class="page page-narrow">
+  <p class="crumb"><a href="{% url 'suppliers' %}">Suppliers</a></p>
+  <h1>{{ supplier.name }}</h1>
+  <p class="lede">Changes apply to the next sourcing check. Earlier sheets keep the table exactly as it was sent.</p>
+  <form method="post" class="supplier-form">
+    {% include "workflow/includes/supplier_form.html" with wide_fields="makes techniques materials limits prices notes" %}
+    <div class="form-foot">
+      <p class="meta">Last saved {{ supplier.updated_at|date:"j M Y, H:i" }}</p>
+      <button class="btn btn-primary" type="submit">Save supplier</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

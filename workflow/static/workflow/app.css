@@ -87,12 +87,12 @@ a { color: inherit; }
 .link-btn:hover { color: var(--floss-deep); }
 
 label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.35rem; }
-input[type="text"], textarea, select {
+input[type="text"], input[type="url"], input[type="date"], textarea, select {
   font: inherit; color: var(--ink); width: 100%;
   padding: 0.65rem 0.8rem; border: 1.5px solid var(--line); border-radius: var(--radius); background: var(--paper);
 }
 textarea { resize: vertical; line-height: 1.5; }
-input[type="text"]:hover, textarea:hover, select:hover { border-color: var(--ink-soft); }
+input[type="text"]:hover, input[type="url"]:hover, input[type="date"]:hover, textarea:hover, select:hover { border-color: var(--ink-soft); }
 
 /* Pages */
 .page { padding: clamp(1.5rem, 4vw, 3rem) clamp(1rem, 4vw, 2.5rem) 4rem; max-width: 76rem; }
@@ -662,3 +662,46 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .model-pick .btn { justify-self: start; }
 .results-table th[scope="row"] code { white-space: nowrap; }
 .results-table th[scope="row"] { white-space: nowrap; }
+
+
+/* Stage 3: sourcing check. Each piece is a card with its verdict on the selvedge. */
+.run-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-top: 1rem; }
+.run-row .meta { margin: 0; max-width: 60ch; }
+.sourcing { margin-top: 1.5rem; border: 1.5px solid var(--line); border-radius: var(--radius); padding: 1.25rem 1.5rem; }
+.sourcing-summary { max-width: var(--measure); margin: 0 0 1rem; }
+.sourcing-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+.sourcing-piece { border: 1.5px solid var(--line); border-left-width: 6px; border-radius: var(--radius); padding: 1rem 1.25rem; background: var(--paper); }
+.sourcing-piece.verdict-makeable_as_specified { border-left-color: var(--moss); }
+.sourcing-piece.verdict-makeable_with_changes { border-left-color: var(--ochre); }
+.sourcing-piece.verdict-needs_sourcing { border-left-color: var(--floss); }
+.sourcing-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.sourcing-head h3 .meta { font-family: var(--body); font-weight: 400; font-size: 0.85rem; }
+.sourcing-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; margin: 0.9rem 0; }
+.sourcing-facts div { background: var(--chalk); border-radius: 8px; padding: 0.5rem 0.7rem; }
+.sourcing-facts dt { font-size: 0.78rem; color: var(--ink-soft); font-weight: 600; }
+.sourcing-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.sourcing-facts .low { color: var(--floss-deep); }
+.sourcing-piece h4 { font-size: 0.95rem; margin: 0.6rem 0 0.3rem; }
+.plain { margin: 0.25rem 0 0; padding-left: 1.2rem; }
+.plain li { max-width: var(--measure); }
+.decide { border: 0; margin: 1rem 0 0; padding: 0; display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.decide legend { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.4rem; padding: 0; }
+.decide .pick { margin: 0; padding: 0.5rem 0.85rem; font-weight: 500; }
+
+/* Supplier table */
+.section-title { margin-top: 2.25rem; margin-bottom: 0.4rem; }
+.suppliers-table td { min-width: 7rem; }
+.suppliers-table tr.is-inactive td { color: var(--ink-soft); }
+.supplier-form { margin-top: 1rem; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem 1.25rem; }
+.form-field.wide { grid-column: 1 / -1; }
+.form-field .meta { margin: 0.3rem 0 0; font-size: 0.82rem; }
+.form-check label { display: flex; align-items: center; gap: 0.5rem; }
+.form-check input { width: 1.15rem; height: 1.15rem; accent-color: var(--floss); }
+.has-error input, .has-error textarea, .has-error select { border-color: var(--floss); }
+.field-error { color: var(--floss-deep); font-size: 0.85rem; font-weight: 600; margin: 0.3rem 0 0; }
+
+@media (max-width: 60rem) {
+  .sourcing-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form-grid { grid-template-columns: 1fr; }
+}
