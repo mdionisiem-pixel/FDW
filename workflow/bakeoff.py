@@ -11,6 +11,7 @@ page for long and a closed browser loses nothing: every image is a stored
 job that is either waiting, made or failed.
 """
 import base64
+import io
 import json
 import random
 import ssl
@@ -30,7 +31,14 @@ from . import prompts, schemas
 from .llm import StageError, cost_of, get_client, parse_json
 from .models import BakeoffImage, BakeoffPiece
 
-MAX_PHOTO_BYTES = 5 * 1024 * 1024
+# Photos straight from a phone or camera are accepted and made smaller here.
+MAX_PHOTO_BYTES = 50 * 1024 * 1024
+# The longest side Claude looks at in detail (Claude Sonnet 5.5 migration
+# guide, read 13 November 2026). Anything larger is scaled down by the API
+# anyway, so it would only cost upload time.
+PHOTO_LONG_EDGE = 2576
+# Claude rejects images above 5 MB, so a stored photo is kept under this.
+PHOTO_TARGET_BYTES = int(4.5 * 1024 * 1024)
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 SHOT_ORDER = ("A", "C", "D")
 # Which real photo each generated shot is compared with.
@@ -61,14 +69,42 @@ def sniff(data: bytes):
 
 
 def check_photo(upload):
-    """Validate an uploaded photo by its content, not its name. Returns ContentFile or raises."""
+    """Open an uploaded photo by its content, not its name, and store a web-sized JPEG.
+
+    The photo is turned upright using its rotation tag, scaled down so its
+    longest side is at most PHOTO_LONG_EDGE pixels, and saved without its
+    metadata, so a phone's GPS location never leaves the app. Returns a
+    ContentFile or raises BakeoffError with a message the founder can act on.
+    """
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        from pillow_heif import register_heif_opener
+        register_heif_opener()
+    except ImportError:  # HEIC support is optional; JPEG, PNG and WebP still work
+        pass
+
     if upload.size > MAX_PHOTO_BYTES:
-        raise BakeoffError(f"{upload.name} is larger than 5 MB. Export it smaller and try again.")
-    data = upload.read()
-    kind = sniff(data)
-    if kind is None:
-        raise BakeoffError(f"{upload.name} is not a JPEG, PNG or WebP image.")
-    return ContentFile(data, name=f"{uuid.uuid4().hex}.{kind[1]}")
+        raise BakeoffError(f"{upload.name} is larger than 50 MB. Export it smaller and try again.")
+    try:
+        with Image.open(upload) as opened:
+            opened.load()
+            image = ImageOps.exif_transpose(opened)
+            if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+                rgba = image.convert("RGBA")
+                image = Image.new("RGB", rgba.size, (255, 255, 255))
+                image.paste(rgba, mask=rgba.getchannel("A"))
+            else:
+                image = image.convert("RGB")
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, ValueError):
+        raise BakeoffError(f"{upload.name} could not be read as a photo. Use JPEG, PNG, WebP or HEIC.") from None
+    image.thumbnail((PHOTO_LONG_EDGE, PHOTO_LONG_EDGE), Image.Resampling.LANCZOS)
+    for quality in (90, 82, 74, 66):
+        buffer = io.BytesIO()
+        image.save(buffer, "JPEG", quality=quality, optimize=True)
+        if buffer.tell() <= PHOTO_TARGET_BYTES:
+            break
+    return ContentFile(buffer.getvalue(), name=f"{uuid.uuid4().hex}.jpg")
 
 
 def _photo_payload(field_file):
