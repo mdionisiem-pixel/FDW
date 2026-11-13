@@ -23,7 +23,8 @@
     var found = false;
     loaders.forEach(function (svg) {
       var match = svg.getAttribute("data-loader") === name;
-      svg.hidden = !match;
+      // SVG elements have no "hidden" property, so the attribute is set directly.
+      svg.toggleAttribute("hidden", !match);
       found = found || match;
     });
     if (!found) showLoader("crochet");

@@ -466,7 +466,7 @@ def run_stage3(cycle: Cycle, client=None) -> SourcingCheck:
         if suppliers else "[] (the table is empty: no supplier has been added yet)",
     )
     data = run_json(
-        cycle, "sourcing_check", prompt, settings.FDW_MODEL_WRITER, 12000,
+        cycle, "sourcing_check", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
         lambda d: schemas.validate_sourcing(d, specs, suppliers), client,
     )
     entries = {item["piece_id"]: item for item in data["pieces"]}
