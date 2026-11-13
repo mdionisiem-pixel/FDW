@@ -92,8 +92,9 @@ class AnthropicClient:
                 continue
             if message.stop_reason == "max_tokens":
                 raise StageError(
-                    f"The model's answer for '{step}' was cut off at {max_tokens} tokens. "
-                    "Nothing was saved."
+                    f"The model's answer for '{step}' was cut off at {max_tokens} tokens, "
+                    "which includes its reasoning. Nothing was saved. Raise FDW_MAX_OUTPUT_TOKENS "
+                    "in .env (the model allows up to 128000) and run the step again."
                 )
             return result
         raise StageError(f"The model call for '{step}' paused too many times. Nothing was saved.")
