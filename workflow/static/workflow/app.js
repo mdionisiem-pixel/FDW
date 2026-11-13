@@ -4,6 +4,64 @@
 (function () {
   "use strict";
 
+  // Sewing loaders. Each step that calls a model gets the loader that fits it;
+  // anything else gets the crochet chain, which loops without a visible restart.
+  var LOADER_BY_STEP = [
+    ["/stage-1/", "spool"],
+    ["/stage-2/", "hoop"],
+    ["/stage-3/", "machine"],
+    ["/bakeoff/", "cross"],
+  ];
+  function loaderFor(action) {
+    for (var i = 0; i < LOADER_BY_STEP.length; i++) {
+      if (action.indexOf(LOADER_BY_STEP[i][0]) !== -1) return LOADER_BY_STEP[i][1];
+    }
+    return "crochet";
+  }
+  function showLoader(name) {
+    var loaders = document.querySelectorAll(".loader[data-loader]");
+    var found = false;
+    loaders.forEach(function (svg) {
+      var match = svg.getAttribute("data-loader") === name;
+      svg.hidden = !match;
+      found = found || match;
+    });
+    if (!found) showLoader("crochet");
+  }
+
+  // Build the repeated parts of two loaders once: the heart's X stitches and the chain loops.
+  var SVG = "http://www.w3.org/2000/svg";
+  var HEART = ["..XX.XX..", ".XXXXXXX.", ".XXXXXXX.", "..XXXXX..", "...XXX...", "....X...."];
+  document.querySelectorAll(".ld-cross").forEach(function (group) {
+    var n = 0;
+    HEART.forEach(function (row, r) {
+      row.split("").forEach(function (cell, c) {
+        if (cell !== "X") return;
+        var x = 24 + c * 9, y = 24 + r * 9;
+        var stitch = document.createElementNS(SVG, "g");
+        stitch.style.animationDelay = (n * 0.17) + "s";
+        stitch.innerHTML =
+          '<path d="M' + (x - 3.4) + ' ' + (y + 3.4) + 'L' + (x + 3.4) + ' ' + (y - 3.4) + '" stroke="#9b1848" stroke-width="2.4"/>' +
+          '<path d="M' + (x - 3.4) + ' ' + (y - 3.4) + 'L' + (x + 3.4) + ' ' + (y + 3.4) + '" stroke="#c2255c" stroke-width="2.4"/>' +
+          '<path d="M' + (x - 2.2) + ' ' + (y - 2.8) + 'L' + (x + 1.6) + ' ' + (y + 1) + '" stroke="#f3b7cc" stroke-width=".7"/>';
+        group.appendChild(stitch);
+        n++;
+      });
+    });
+  });
+  document.querySelectorAll(".ld-chain").forEach(function (group) {
+    for (var k = 0; k < 14; k++) {
+      var x = 20 + k * 16;
+      var loop = document.createElementNS(SVG, "g");
+      loop.innerHTML =
+        '<ellipse cx="' + x + '" cy="60.6" rx="9.5" ry="6.2" fill="none" stroke="#7d1239" stroke-width="4.4"/>' +
+        '<ellipse cx="' + x + '" cy="60" rx="9.5" ry="6.2" fill="none" stroke="#c2255c" stroke-width="3.2"/>' +
+        '<path d="M' + (x - 6) + ' 55.4Q' + x + ' 53.2 ' + (x + 6) + ' 55.4" fill="none" stroke="#f3b7cc" stroke-width=".9"/>' +
+        '<path d="M' + (x - 9) + ' 58l2 3M' + (x + 7) + ' 58l2 3M' + (x - 3) + ' 64l2 2" stroke="#9b1848" stroke-width=".8"/>';
+      group.appendChild(loop);
+    }
+  });
+
   // Working overlay for forms that call the model.
   var overlay = document.getElementById("working");
   var overlayTitle = document.getElementById("working-title");
@@ -13,6 +71,8 @@
       var label = (event.submitter && event.submitter.getAttribute("data-working")) || form.getAttribute("data-working");
       if (!overlay || !label) return;
       overlayTitle.textContent = label;
+      var action = (event.submitter && event.submitter.formAction) || form.action || "";
+      showLoader((event.submitter && event.submitter.getAttribute("data-loader")) || form.getAttribute("data-loader") || loaderFor(action));
       overlay.hidden = false;
       form.querySelectorAll("button[type=submit]").forEach(function (button) {
         // Disable after the submit has been dispatched, so the form still posts.

@@ -354,12 +354,40 @@ thead th { font-size: 0.82rem; color: var(--ink-soft); font-weight: 600; border-
 .working-card { background: var(--paper); border-radius: 14px; padding: 2rem 2.25rem; max-width: 28rem; text-align: left; }
 .working-title { font-family: var(--display); font-weight: 650; font-size: 1.3rem; margin: 0.75rem 0 0.35rem; }
 .working-note { color: var(--ink-soft); }
-.working-stitch { max-width: 100%; }
-.working-stitch path { fill: none; stroke: var(--floss); stroke-width: 3; stroke-linecap: round; stroke-dasharray: 14 10; animation: sew 0.9s linear infinite; }
-@keyframes sew { to { stroke-dashoffset: -24; } }
+/* Sewing loaders: one is shown per run, chosen in app.js by the step that is working. */
+.loaders { position: relative; display: flex; justify-content: center; align-items: center; height: 152px; background: var(--chalk); border-radius: var(--radius); padding: 0.5rem; overflow: hidden; }
+.loaders::after { content: ""; position: absolute; inset: 6px; border: 1.5px dashed var(--line); border-radius: calc(var(--radius) - 4px); pointer-events: none; }
+.loader-defs { position: absolute; }
+.loader { max-width: 100%; height: auto; }
+.loader[hidden] { display: none; }
+.ld-petals > g > use, .ld-cross > g, .ld-hoop-needle, .ld-hook { transform-box: fill-box; }
+
+.ld-petals > g > use, .ld-cross > g { transform-origin: center; animation: ld-pop 7s infinite backwards; }
+.ld-petals > g:nth-child(2) > use { animation-delay: 0.6s; }
+.ld-petals > g:nth-child(3) > use { animation-delay: 1.2s; }
+.ld-petals > g:nth-child(4) > use { animation-delay: 1.8s; }
+.ld-petals > g:nth-child(5) > use { animation-delay: 2.4s; }
+.ld-petals > g:nth-child(6) > use { animation-delay: 3s; }
+.ld-hoop-needle { transform-origin: 0 100%; animation: ld-sway 1.4s ease-in-out infinite; }
+.ld-plunge { animation: ld-plunge 0.25s ease-in-out infinite alternate; }
+.ld-wheel { transform-box: fill-box; transform-origin: center; animation: ld-turn 1s linear infinite; }
+.ld-feed { animation: ld-flow 0.5s linear infinite; }
+.ld-chain { animation: ld-chain 0.7s linear infinite; }
+.ld-hook { transform-origin: 100% 50%; animation: ld-hook 0.7s ease-in-out infinite; }
+.ld-spin { animation: ld-spin 0.4s linear infinite; }
+.ld-flow { animation: ld-flow 0.4s linear infinite; }
+
+@keyframes ld-pop { 0%, 6% { opacity: 0; transform: scale(0.5); } 14%, 86% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+@keyframes ld-sway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes ld-plunge { from { transform: translateY(0); } to { transform: translateY(10px); } }
+@keyframes ld-turn { to { transform: rotate(360deg); } }
+@keyframes ld-flow { to { stroke-dashoffset: -16; } }
+@keyframes ld-chain { from { transform: translateX(0); } to { transform: translateX(-16px); } }
+@keyframes ld-hook { 0%, 100% { transform: rotate(-6deg) translateX(0); } 50% { transform: rotate(4deg) translateX(-6px); } }
+@keyframes ld-spin { from { transform: translateY(0); } to { transform: translateY(-6px); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .working-stitch path { animation: none; }
+  .loader, .loader * { animation: none !important; }
 }
 
 @media (max-width: 60rem) {

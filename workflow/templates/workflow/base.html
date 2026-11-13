@@ -46,9 +46,105 @@
 
   <div class="working" id="working" hidden role="alertdialog" aria-modal="true" aria-labelledby="working-title">
     <div class="working-card">
-      <svg class="working-stitch" viewBox="0 0 240 24" width="240" height="24" aria-hidden="true">
-        <path d="M4 12 H236" />
-      </svg>
+      <div class="loaders" aria-hidden="true">
+        <svg width="0" height="0" class="loader-defs">
+          <defs>
+            <pattern id="ld-linen" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="#f1efe8"/><path d="M0 1H4M1 0V4" stroke="#d3d1c7" stroke-width=".7"/></pattern>
+            <pattern id="ld-aida" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#f4f1e8"/><path d="M0 .5H8M.5 0V8" stroke="#dcd8cc" stroke-width="1"/><circle cx=".5" cy=".5" r=".9" fill="#c9c4b5"/></pattern>
+            <pattern id="ld-satin" width="2.4" height="2.4" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="2.4" height="2.4" fill="#ec8fb0"/><path d="M0 0V2.4" stroke="#c2255c" stroke-width="1.3"/></pattern>
+            <pattern id="ld-wound" width="6" height="3" patternUnits="userSpaceOnUse"><rect width="6" height="3" fill="#c2255c"/><path d="M0 2.6H6" stroke="#7d1239" stroke-width=".8"/></pattern>
+            <path id="ld-petal" d="M60 62 C52 50 52 38 60 32 C68 38 68 50 60 62Z"/>
+            <clipPath id="ld-hoop-in"><circle cx="60" cy="62" r="40"/></clipPath>
+            <clipPath id="ld-chain-clip"><rect x="10" y="30" width="190" height="60"/></clipPath>
+            <linearGradient id="ld-fade"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".35" stop-color="#fff" stop-opacity="1"/></linearGradient>
+            <mask id="ld-chain-fade" maskUnits="userSpaceOnUse" x="100" y="30" width="110" height="60"><rect x="100" y="30" width="110" height="60" fill="url(#ld-fade)"/></mask>
+            <clipPath id="ld-spool-clip"><rect x="46" y="34" width="44" height="54"/></clipPath>
+          </defs>
+        </svg>
+
+        <!-- Embroidery hoop: satin-stitch petals fill, then unpick -->
+        <svg class="loader" data-loader="hoop" viewBox="0 0 120 120" width="140" height="140" hidden>
+          <ellipse cx="62" cy="114" rx="34" ry="3.2" fill="#1b2140" fill-opacity=".1"/>
+          <circle cx="60" cy="62" r="40" fill="url(#ld-linen)"/>
+          <g clip-path="url(#ld-hoop-in)" class="ld-petals">
+            <g><use href="#ld-petal" fill="url(#ld-satin)" stroke="#9b1848" stroke-width=".8"/></g>
+            <g transform="rotate(60 60 62)"><use href="#ld-petal" fill="url(#ld-satin)" stroke="#9b1848" stroke-width=".8"/></g>
+            <g transform="rotate(120 60 62)"><use href="#ld-petal" fill="url(#ld-satin)" stroke="#9b1848" stroke-width=".8"/></g>
+            <g transform="rotate(180 60 62)"><use href="#ld-petal" fill="url(#ld-satin)" stroke="#9b1848" stroke-width=".8"/></g>
+            <g transform="rotate(240 60 62)"><use href="#ld-petal" fill="url(#ld-satin)" stroke="#9b1848" stroke-width=".8"/></g>
+            <g transform="rotate(300 60 62)"><use href="#ld-petal" fill="url(#ld-satin)" stroke="#9b1848" stroke-width=".8"/></g>
+            <circle cx="60" cy="62" r="4.2" fill="#f5c46b" stroke="#a7731c" stroke-width=".8"/>
+          </g>
+          <circle cx="60" cy="62" r="42" fill="none" stroke="#e2a548" stroke-width="3"/>
+          <circle cx="60" cy="62" r="46" fill="none" stroke="#b8862f" stroke-width="4.5"/>
+          <circle cx="60" cy="62" r="48.2" fill="none" stroke="#7a5512" stroke-width=".6"/>
+          <rect x="53" y="8" width="14" height="9" rx="2" fill="#e2a548" stroke="#7a5512" stroke-width=".8"/>
+          <rect x="57" y="4" width="6" height="6" rx="1" fill="#f5c46b" stroke="#7a5512" stroke-width=".8"/>
+          <g class="ld-hoop-needle">
+            <path d="M74 56L94.6 21.6Q96 20 96.6 21.8L76.6 57.2Z" fill="#c9c7bf" stroke="#5f5e5a" stroke-width=".7"/>
+            <path d="M93.4 24.6L78 51" stroke="#f1efe8" stroke-width=".8"/>
+            <ellipse cx="94.6" cy="23.6" rx=".7" ry="2" transform="rotate(30 94.6 23.6)" fill="#444441"/>
+            <path d="M94.6 23.6Q104 14 110 26T116 46" fill="none" stroke="#9b1848" stroke-width="1.8" stroke-linecap="round"/>
+            <path d="M94.6 23.6Q104 14 110 26T116 46" fill="none" stroke="#f3b7cc" stroke-width=".5" stroke-dasharray="2 3"/>
+          </g>
+        </svg>
+
+        <!-- Cross-stitch: X stitches fill a heart on aida cloth -->
+        <svg class="loader" data-loader="cross" viewBox="0 0 120 104" width="150" height="130" hidden>
+          <ellipse cx="60" cy="99" rx="50" ry="3" fill="#1b2140" fill-opacity=".1"/>
+          <rect x="8" y="6" width="104" height="88" rx="3" fill="url(#ld-aida)" stroke="#c9c4b5"/>
+          <g class="ld-cross" stroke-linecap="round"></g>
+        </svg>
+
+        <!-- Sewing machine: the needle plunges, the handwheel turns, finished stitches leave to the left -->
+        <svg class="loader" data-loader="machine" viewBox="12 2 276 106" width="300" height="115" hidden>
+          <ellipse cx="150" cy="104" rx="122" ry="4" fill="#1b2140" fill-opacity=".08"/>
+          <rect x="28" y="84" width="244" height="16" rx="3" fill="#e6e1d3" stroke="#8a8579"/>
+          <rect x="94" y="82" width="34" height="4" rx="1" fill="#b4b2a9"/>
+          <rect x="18" y="77" width="264" height="7" fill="url(#ld-linen)" stroke="#c9c4b5" stroke-width=".6"/>
+          <path class="ld-feed" d="M18 80.5H108" stroke="#c2255c" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="6 4"/>
+          <path d="M82 58Q72 58 72 48V36Q72 26 82 26H234Q248 26 248 40V84H206V46H98V58Z" fill="#ece8dc" stroke="#8a8579"/>
+          <path d="M210 82V48" stroke="#fff" stroke-opacity=".7" stroke-width="2"/>
+          <rect x="98" y="33" width="106" height="3" rx="1" fill="#c2255c"/>
+          <circle cx="86" cy="36" r="4" fill="#d3d1c7" stroke="#8a8579" stroke-width=".8"/>
+          <g class="ld-wheel"><circle cx="256" cy="46" r="13" fill="#d3d1c7" stroke="#8a8579"/><path d="M256 35V57M245 46H267" stroke="#8a8579" stroke-width="1.6"/><circle cx="256" cy="46" r="3.5" fill="#888780"/></g>
+          <rect x="176" y="10" width="14" height="13" rx="2" fill="url(#ld-wound)" stroke="#7d1239" stroke-width=".7"/>
+          <rect x="173" y="8" width="20" height="3" rx="1" fill="#b8862f"/><rect x="173" y="22" width="20" height="3" rx="1" fill="#b8862f"/>
+          <path d="M183 12Q130 2 86 34Q84 48 104 60" fill="none" stroke="#c2255c" stroke-width=".9"/>
+          <rect x="112" y="58" width="4" height="17" fill="#888780"/>
+          <rect x="98" y="73" width="22" height="4" rx="1.5" fill="#5f5e5a"/>
+          <g class="ld-plunge"><rect x="101" y="56" width="8" height="12" rx="1.5" fill="#888780"/><path d="M104.2 68H105.8L105.3 82H104.7Z" fill="#444441"/><circle cx="105" cy="78.5" r=".6" fill="#f1efe8"/></g>
+        </svg>
+
+        <!-- Crochet: a hook pulls loop after loop and the chain grows -->
+        <svg class="loader" data-loader="crochet" viewBox="100 30 192 54" width="290" height="82" hidden>
+          <g clip-path="url(#ld-chain-clip)" mask="url(#ld-chain-fade)"><g class="ld-chain"></g></g>
+          <g class="ld-hook">
+            <path d="M196 60Q194 52 201 52Q206 53 204 58L280 66L280 70L202 62Q196 64 196 60Z" fill="#888780" stroke="#5f5e5a" stroke-width=".8"/>
+            <path d="M206 58.6L278 66.4" stroke="#f1efe8" stroke-width=".8"/>
+            <rect x="228" y="60" width="30" height="11" rx="5" transform="rotate(6 243 65)" fill="#c2255c" stroke="#7d1239" stroke-width=".8"/>
+            <path d="M233 63.6L253 65.8" transform="rotate(6 243 65)" stroke="#f3b7cc" stroke-width="1"/>
+            <path d="M200 57Q190 46 188 60Q190 72 200 62" fill="none" stroke="#c2255c" stroke-width="3"/>
+          </g>
+          <path d="M290 36Q246 32 203 55" fill="none" stroke="#7d1239" stroke-width="3.6" stroke-linecap="round"/><path d="M290 36Q246 32 203 55" fill="none" stroke="#c2255c" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+
+        <!-- Spool: a wooden spool turns and feeds thread to a needle -->
+        <svg class="loader" data-loader="spool" viewBox="30 20 252 82" width="290" height="94" hidden>
+          <ellipse cx="68" cy="98" rx="30" ry="2.6" fill="#1b2140" fill-opacity=".1"/>
+          <g clip-path="url(#ld-spool-clip)"><g class="ld-spin"><rect x="46" y="28" width="44" height="72" fill="url(#ld-wound)"/></g></g>
+          <rect x="46" y="34" width="9" height="54" fill="#4b0f25" fill-opacity=".28"/>
+          <rect x="80" y="34" width="10" height="54" fill="#4b0f25" fill-opacity=".38"/>
+          <rect x="62" y="34" width="4" height="54" fill="#f3b7cc" fill-opacity=".45"/>
+          <rect x="46" y="34" width="44" height="54" fill="none" stroke="#7d1239" stroke-width=".8"/>
+          <rect x="40" y="28" width="56" height="7" rx="2" fill="#e2a548" stroke="#7a5512" stroke-width=".8"/>
+          <rect x="40" y="87" width="56" height="7" rx="2" fill="#e2a548" stroke="#7a5512" stroke-width=".8"/>
+          <path d="M42 33.6H94M42 92.6H94" stroke="#a7731c" stroke-width="1.2"/>
+          <path d="M90 50C140 40 170 80 220 60" fill="none" stroke="#9b1848" stroke-width="2.4" stroke-linecap="round"/>
+          <path class="ld-flow" d="M90 50C140 40 170 80 220 60" fill="none" stroke="#f3b7cc" stroke-width=".9" stroke-dasharray="3 5"/>
+          <g transform="rotate(-20 240 58)"><path d="M216 57L270 55L270 61L216 59Z" fill="#b4b2a9" stroke="#5f5e5a" stroke-width=".8"/><path d="M220 57.6L262 56.6" stroke="#f1efe8" stroke-width=".7"/><ellipse cx="225" cy="58" rx="3" ry=".8" fill="#444441"/></g>
+        </svg>
+      </div>
       <p id="working-title" class="working-title">Working</p>
       <p class="working-note">This can take a minute or two. Keep this tab open; the page updates when it finishes.</p>
     </div>
