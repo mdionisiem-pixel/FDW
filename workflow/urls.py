@@ -29,6 +29,10 @@ urlpatterns = [
     path("cycles/<int:pk>/stage-2/select/", views.select_concepts, name="select_concepts"),
     path("cycles/<int:pk>/stage-3/run/", views.run_stage3, name="run_stage3"),
     path("cycles/<int:pk>/stage-3/decide/", views.decide_sourcing, name="decide_sourcing"),
+    path("cycles/<int:pk>/stage-4/start/", views.start_stage4, name="start_stage4"),
+    path("cycles/<int:pk>/stage-4/next/", views.visuals_next, name="visuals_next"),
+    path("cycles/<int:pk>/stage-4/pieces/<int:visuals_pk>/decide/", views.decide_visuals, name="decide_visuals"),
+    path("cycles/<int:pk>/stage-4/images/<int:attempt_pk>/", views.visual_image, name="visual_image"),
     path("suppliers/", views.suppliers, name="suppliers"),
     path("suppliers/<int:supplier_pk>/", views.edit_supplier, name="edit_supplier"),
 ]

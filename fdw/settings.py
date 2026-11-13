@@ -94,8 +94,11 @@ DATABASES = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
         # Parallel model calls each record their result; wait for a write lock
-        # instead of failing at once.
-        "OPTIONS": {"timeout": 30},
+        # instead of failing at once. IMMEDIATE makes every transaction take the
+        # write lock when it starts. Without it, a transaction that reads first
+        # and writes later fails at once with "database is locked" when another
+        # request is writing, because SQLite cannot make it wait safely.
+        "OPTIONS": {"timeout": 30, "transaction_mode": "IMMEDIATE"},
         # Tests use a file too, like the real app, so parallel calls are tested
         # against the same locking behaviour. Django deletes it after the run.
         "TEST": {"NAME": BASE_DIR / "test_db.sqlite3"},
@@ -222,3 +225,26 @@ FDW_IMAGE_RESOLUTION = os.environ.get("FDW_IMAGE_RESOLUTION", "2K")
 # Hard stop for the whole bake-off, in US dollars. Image costs are as
 # reported by OpenRouter; the Claude call that writes the prompts counts too.
 FDW_BAKEOFF_LIMIT_USD = Decimal(os.environ.get("FDW_BAKEOFF_LIMIT_USD", "10"))
+
+# --- Stage 4: visual prototypes -------------------------------------------------
+
+# The image model chosen by the bake-off of 14 November 2026: Gemini 3 Pro
+# scored highest on matching the real piece (4.67 of 5 on average).
+FDW_IMAGE_MODEL = os.environ.get("FDW_IMAGE_MODEL", "google/gemini-3-pro-image")
+# Hard stop for stage 4 in one cycle, in US dollars: images plus the Claude
+# calls that write and review them. Set by the founder on 14 November 2026.
+FDW_VISUALS_LIMIT_USD = Decimal(os.environ.get("FDW_VISUALS_LIMIT_USD", "15"))
+# What one image is assumed to cost when OpenRouter does not report a cost,
+# and what is set aside before each image so parallel work cannot overshoot
+# the limit. The bake-off measured $0.1358 per Gemini 3 Pro image.
+FDW_IMAGE_COST_ESTIMATE_USD = Decimal(os.environ.get("FDW_IMAGE_COST_ESTIMATE_USD", "0.14"))
+# Set aside before each Claude call in stage 4 (prompt writing or one image review).
+FDW_VISUAL_CALL_ESTIMATE_USD = Decimal(os.environ.get("FDW_VISUAL_CALL_ESTIMATE_USD", "0.08"))
+# Attempts per shot before it goes to the founder marked "could not meet standard".
+FDW_MAX_SHOT_ATTEMPTS = int(os.environ.get("FDW_MAX_SHOT_ATTEMPTS", "3"))
+# How many images the page makes at the same time. Pieces do not depend on
+# each other, so several can be worked on at once.
+FDW_VISUAL_WORKERS = int(os.environ.get("FDW_VISUAL_WORKERS", "3"))
+# Longest side, in pixels, of the images the reviewer looks at. Larger shows
+# more stitch detail and costs more per review.
+FDW_REVIEW_IMAGE_EDGE = int(os.environ.get("FDW_REVIEW_IMAGE_EDGE", "1568"))
