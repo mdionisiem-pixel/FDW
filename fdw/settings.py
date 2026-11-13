@@ -4,6 +4,7 @@ Configuration comes from environment variables so that secrets never live in
 the repository. See .env.example for the full list.
 """
 import os
+import sys
 from decimal import Decimal
 from pathlib import Path
 
@@ -92,6 +93,12 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
+        # Parallel model calls each record their result; wait for a write lock
+        # instead of failing at once.
+        "OPTIONS": {"timeout": 30},
+        # Tests use a file too, like the real app, so parallel calls are tested
+        # against the same locking behaviour. Django deletes it after the run.
+        "TEST": {"NAME": BASE_DIR / "test_db.sqlite3"},
     }
 }
 
@@ -145,6 +152,18 @@ FDW_PRICES = {
 # Only tokens actually produced are billed, and the cycle spend limit below
 # still stops the money.
 FDW_MAX_OUTPUT_TOKENS = int(os.environ.get("FDW_MAX_OUTPUT_TOKENS", "64000"))
+
+# How much the model reasons before answering a review step (low, medium,
+# high). Reviews follow a fixed checklist, so they use less than the design
+# steps, which keep the model's default. Empty means the model's default.
+FDW_REVIEW_EFFORT = os.environ.get("FDW_REVIEW_EFFORT", "medium").strip().lower()
+
+# How many independent model calls may run at the same time, for example the
+# three collections in stage 2. 1 runs them one after another.
+# The test suite runs them one at a time, because its in-memory database is
+# not shared safely between threads; one test switches parallel calls on.
+_RUNNING_TESTS = len(sys.argv) > 1 and sys.argv[1] == "test"
+FDW_PARALLEL_CALLS = int(os.environ.get("FDW_PARALLEL_CALLS", "1" if _RUNNING_TESTS else "3"))
 
 # Hard stop: no model call is made for a cycle once its recorded spend
 # reaches this amount.

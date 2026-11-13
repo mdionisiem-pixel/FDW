@@ -5,6 +5,7 @@ from django.conf import settings
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -293,6 +294,8 @@ def cycle_detail(request, pk):
         "min_margin_percent": round(settings.FDW_MIN_GROSS_MARGIN * 100),
         "dry_run": settings.FDW_DRY_RUN,
     }
+    last_call = cycle.model_calls.order_by("-id").first()
+    context["last_call_id"] = last_call.id if last_call else 0
     return render(request, "workflow/cycle_detail.html", context)
 
 
@@ -508,4 +511,23 @@ def edit_supplier(request, supplier_pk):
         "supplier": supplier,
         "form": form,
         "dry_run": settings.FDW_DRY_RUN,
+    })
+
+
+@login_required
+def cycle_progress(request, pk):
+    """Model calls finished since the page loaded, for the working overlay.
+
+    Each call is recorded the moment it finishes, so this shows real progress
+    while a stage is still running in another request.
+    """
+    cycle = get_object_or_404(Cycle, pk=pk)
+    try:
+        after = int(request.GET.get("after", "0"))
+    except ValueError:
+        after = 0
+    calls = cycle.model_calls.filter(id__gt=after).order_by("id")
+    return JsonResponse({
+        "calls": [{"step": c.step, "ok": c.ok} for c in calls],
+        "spent": f"{cycle.spend_usd:.2f}",
     })

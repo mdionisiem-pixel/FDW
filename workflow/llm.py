@@ -54,14 +54,20 @@ class AnthropicClient:
         )
 
     def complete(self, step: str, prompt: str, model: str, max_tokens: int,
-                 web_search_max: int = 0, images=None) -> LLMResult:
+                 web_search_max: int = 0, images=None, effort: str = "") -> LLMResult:
         """Run one request. With ``web_search_max`` above zero the model may search the web.
+
+        ``effort`` (low, medium, high) sets how much the model reasons before it
+        answers. Empty means the model's own default.
 
         Web search is the only tool ever offered, and only to the research
         step, so text found on a web page has nothing else it could trigger.
         ``images`` is an optional list of (media_type, base64 data) the model can look at.
         """
         kwargs = {"model": model, "max_tokens": max_tokens}
+        if effort:
+            # Sent as a raw field so it works whichever SDK version is installed.
+            kwargs["extra_body"] = {"output_config": {"effort": effort}}
         if web_search_max > 0:
             kwargs["tools"] = [{
                 "type": settings.FDW_WEB_SEARCH_TOOL,
@@ -125,7 +131,7 @@ class DryRunClient:
     dry_run = True
 
     def complete(self, step: str, prompt: str, model: str, max_tokens: int,
-                 web_search_max: int = 0, images=None) -> LLMResult:
+                 web_search_max: int = 0, images=None, effort: str = "") -> LLMResult:
         text = dryrun.respond(step, prompt)
         urls = dryrun.sample_source_urls() if web_search_max > 0 else []
         return LLMResult(text, len(prompt) // 4, len(text) // 4,
@@ -164,16 +170,18 @@ def check_spend(cycle) -> None:
 
 
 def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, client,
-               web_search_max: int = 0) -> LLMResult:
+               web_search_max: int = 0, effort: str = "") -> LLMResult:
     """Make one model call for a cycle, record it, and return the full result."""
     check_spend(cycle)
     cost_of(model, 0, 0)  # raises a clear error for an unpriced model before any money is spent
     is_dry = getattr(client, "dry_run", False)
     try:
+        options = {}
         if web_search_max > 0:
-            result = client.complete(step, prompt, model, max_tokens, web_search_max=web_search_max)
-        else:
-            result = client.complete(step, prompt, model, max_tokens)
+            options["web_search_max"] = web_search_max
+        if effort:
+            options["effort"] = effort
+        result = client.complete(step, prompt, model, max_tokens, **options)
     except StageError as exc:
         ModelCall.objects.create(
             cycle=cycle, step=step, model=model, prompt=prompt, ok=False, error=str(exc), dry_run=is_dry,
@@ -196,9 +204,9 @@ def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, clien
     return result
 
 
-def run_call(cycle, step: str, prompt: str, model: str, max_tokens: int, client) -> str:
+def run_call(cycle, step: str, prompt: str, model: str, max_tokens: int, client, effort: str = "") -> str:
     """Make one model call for a cycle and return its text."""
-    return run_result(cycle, step, prompt, model, max_tokens, client).text
+    return run_result(cycle, step, prompt, model, max_tokens, client, effort=effort).text
 
 
 def parse_json(text: str):
@@ -222,14 +230,14 @@ def parse_json(text: str):
         raise SchemaError([f"The response was not valid JSON: {exc}"]) from exc
 
 
-def run_json(cycle, step: str, prompt: str, model: str, max_tokens: int, validator, client):
+def run_json(cycle, step: str, prompt: str, model: str, max_tokens: int, validator, client, effort: str = ""):
     """Call the model and return validated JSON.
 
     If the first answer is malformed or fails validation, the model gets one
     more attempt with the problems listed. After that the stage stops, because
     saving unvalidated output would pass errors on to every later stage.
     """
-    text = run_call(cycle, step, prompt, model, max_tokens, client)
+    text = run_call(cycle, step, prompt, model, max_tokens, client, effort)
     try:
         return validator(parse_json(text))
     except SchemaError as first:
@@ -239,7 +247,7 @@ def run_json(cycle, step: str, prompt: str, model: str, max_tokens: int, validat
             + "\n- ".join(first.problems[:20])
             + "\n\nReturn the complete corrected JSON and nothing else."
         )
-        text = run_call(cycle, f"{step}_retry", retry_prompt, model, max_tokens, client)
+        text = run_call(cycle, f"{step}_retry", retry_prompt, model, max_tokens, client, effort)
         try:
             return validator(parse_json(text))
         except SchemaError as second:

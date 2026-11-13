@@ -2,7 +2,7 @@
 {% load workflow_extras %}
 {% block title %}{{ cycle.name }} | Malina studio{% endblock %}
 {% block content %}
-<div class="cycle">
+<div class="cycle" data-progress-url="{% url 'cycle_progress' cycle.pk %}" data-progress-after="{{ last_call_id }}">
   <aside class="seam" aria-label="Stages">
     <ol>
       {% for stage in rail %}

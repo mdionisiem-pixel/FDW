@@ -27,10 +27,12 @@ class ScriptedClient:
         self.searches = searches
         self.calls = []
         self.max_tokens_seen = []
+        self.efforts = []
         self.search_calls = 0
 
-    def complete(self, step, prompt, model, max_tokens, web_search_max=0):
+    def complete(self, step, prompt, model, max_tokens, web_search_max=0, effort=""):
         self.calls.append(step)
+        self.efforts.append((step, effort))
         self.max_tokens_seen.append(max_tokens)
         queue = self.script.get(step)
         text = queue.pop(0) if queue else dryrun.respond(step, prompt)
