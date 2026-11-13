@@ -63,6 +63,56 @@
     }
   });
 
+  // Live progress while a stage runs: finished model calls, the last step and
+  // the time so far. Each call is recorded when it finishes, so this is real.
+  var STEP_LABELS = {
+    extract_signals: "Read your audience messages",
+    research_trends: "Searched the market",
+    reformat_findings: "Tidied the research findings",
+    demand_brief: "Wrote the market report",
+    plan_concepts: "Planned the three collections",
+    detail_concept: "Specified a collection",
+    review_concept: "Reviewed a collection",
+    revise_concept: "Revised a collection after review",
+    sourcing_check: "Checked the pieces against your suppliers"
+  };
+  function stepLabel(step) {
+    if (/_retry$/.test(step)) return "Corrected an answer that did not pass checks";
+    return STEP_LABELS[step] || "Finished a step";
+  }
+  function startProgress() {
+    var line = document.getElementById("working-progress");
+    var source = document.querySelector("[data-progress-url]");
+    if (!line) return;
+    var started = Date.now();
+    var done = [];
+    function clock() {
+      var seconds = Math.floor((Date.now() - started) / 1000);
+      var minutes = Math.floor(seconds / 60);
+      return minutes ? minutes + " min " + (seconds % 60) + " s" : seconds + " s";
+    }
+    function render() {
+      var text = clock() + " so far";
+      if (done.length) {
+        var last = done[done.length - 1];
+        text = done.length + " step" + (done.length === 1 ? "" : "s") + " done, last: " +
+          stepLabel(last.step).toLowerCase() + (last.ok ? "" : " (failed)") + ". " + text;
+      }
+      line.textContent = text;
+      line.hidden = false;
+    }
+    render();
+    setInterval(render, 1000);
+    if (!source || !window.fetch) return;
+    var url = source.getAttribute("data-progress-url") + "?after=" + encodeURIComponent(source.getAttribute("data-progress-after") || "0");
+    setInterval(function () {
+      fetch(url, { credentials: "same-origin", headers: { "Accept": "application/json" } })
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (data) { if (data) { done = data.calls; render(); } })
+        .catch(function () { /* a missed poll is harmless; the next one catches up */ });
+    }, 4000);
+  }
+
   // Working overlay for forms that call the model.
   var overlay = document.getElementById("working");
   var overlayTitle = document.getElementById("working-title");
@@ -75,6 +125,7 @@
       var action = (event.submitter && event.submitter.formAction) || form.action || "";
       showLoader((event.submitter && event.submitter.getAttribute("data-loader")) || form.getAttribute("data-loader") || loaderFor(action));
       overlay.hidden = false;
+      startProgress();
       form.querySelectorAll("button[type=submit]").forEach(function (button) {
         // Disable after the submit has been dispatched, so the form still posts.
         setTimeout(function () { button.disabled = true; }, 0);

@@ -6,10 +6,11 @@ wait. Model calls happen first and results are saved together at the end, so
 a failed stage leaves the cycle exactly as it was.
 """
 import json
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
 from django.conf import settings
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from . import prompts, schemas
@@ -35,6 +36,28 @@ NO_PAST_RESULTS = "None yet. This is the first cycle."
 
 class GateError(StageError):
     """A stage was asked to run before its gate was passed."""
+
+
+def _in_parallel(work, items):
+    """Run ``work`` on each item, several at a time, and return the results in order.
+
+    Used only for model calls that do not depend on each other. Each worker
+    closes its own database connection when it finishes. If any call fails,
+    its error is raised once all running calls have stopped, and because the
+    stage saves its results only at the end, nothing is saved.
+    """
+    workers = max(1, settings.FDW_PARALLEL_CALLS)
+    if workers == 1 or len(items) < 2:
+        return [work(item) for item in items]
+
+    def run(item):
+        try:
+            return work(item)
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as pool:
+        return list(pool.map(run, items))
 
 
 def _chunks(items, size):
@@ -308,6 +331,7 @@ def _review(cycle, concept_data, brand_brief, brief_text, client):
     review = run_json(
         cycle, "review_concept", prompt, settings.FDW_MODEL_WRITER,
         settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_review, client,
+        effort=settings.FDW_REVIEW_EFFORT,
     )
     # Rules that must hold whatever the reviewer model concluded.
     code_issues = schemas.code_blocking_issues(concept_data)
@@ -343,8 +367,9 @@ def run_stage2(cycle: Cycle, client=None) -> list:
         cycle, "plan_concepts", plan_prompt, settings.FDW_MODEL_WRITER,
         settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_concept_plans, client,
     )
-    generated = {"concepts": []}
-    for plan in plans["concepts"]:
+    # The three collections do not depend on each other, so each one is
+    # specified, reviewed and if needed revised alongside the others.
+    def specify(plan):
         detail_prompt = prompts.render(
             prompts.DETAIL_CONCEPT,
             brand_brief=brand_brief,
@@ -352,15 +377,12 @@ def run_stage2(cycle: Cycle, client=None) -> list:
             target_season=_target_season(cycle),
             concept_plan_json=json.dumps(plan, ensure_ascii=False, indent=1),
         )
-        generated["concepts"].append(
-            run_json(
-                cycle, "detail_concept", detail_prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
-                lambda data, plan=plan: schemas.validate_concept_against_plan(data, plan), client,
-            )
+        return run_json(
+            cycle, "detail_concept", detail_prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
+            lambda data: schemas.validate_concept_against_plan(data, plan), client,
         )
 
-    results = []
-    for concept_data in generated["concepts"]:
+    def review_and_revise(concept_data):
         reviews = [_review(cycle, concept_data, brand_brief, brief.text, client)]
         revisions = 0
         while reviews[-1]["blocking_issues"] and revisions < MAX_CONCEPT_REVISIONS:
@@ -380,7 +402,9 @@ def run_stage2(cycle: Cycle, client=None) -> list:
             concept_data = revised
             revisions += 1
             reviews.append(_review(cycle, concept_data, brand_brief, brief.text, client))
-        results.append((concept_data, reviews, revisions))
+        return concept_data, reviews, revisions
+
+    results = _in_parallel(lambda plan: review_and_revise(specify(plan)), plans["concepts"])
 
     with transaction.atomic():
         cycle.concepts.all().delete()
