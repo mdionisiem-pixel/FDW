@@ -7,7 +7,9 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from . import analyst
-from .models import BrandBrief, BrandBriefVersion, BrandInterview, InterviewTurn
+import difflib
+
+from .models import BrandBrief, BrandBriefVersion, BrandInterview, InterviewTurn, compose_prompt_text
 from .prompts import BRAND_AREAS
 
 COVERAGE_WORDS = {0: "not yet", 1: "thin", 2: "clear", 3: "sharp"}
@@ -24,7 +26,7 @@ def brand_brief(request):
             brief.snapshot(BrandBriefVersion.Source.BEFORE, "Before an edit by hand")
             brief.vision = request.POST.get("vision", "").strip()
             brief.mission = request.POST.get("mission", "").strip()
-            brief.goals = analyst.parse_both_goals(request.POST.get("short_goals", ""), request.POST.get("long_goals", ""))
+            brief.goals = analyst.goals_from_form(request.POST)
             brief.text = text
             brief.save()
             brief.snapshot(BrandBriefVersion.Source.HAND, "Edited by hand")
@@ -56,6 +58,26 @@ def restore_version(request, pk):
     return redirect("brand_brief")
 
 
+def line_changes(before: str, after: str, context: int = 1) -> list:
+    """Line-by-line differences, computed by the app rather than reported by the model.
+
+    Returns rows of {"kind": "same" | "removed" | "added" | "gap", "text": ...}, with
+    ``context`` unchanged lines around each change and a gap marker between groups."""
+    a = [l.rstrip() for l in before.splitlines()]
+    b = [l.rstrip() for l in after.splitlines()]
+    rows = []
+    for group in difflib.SequenceMatcher(None, a, b, autojunk=False).get_grouped_opcodes(context):
+        if rows:
+            rows.append({"kind": "gap", "text": ""})
+        for tag, i1, i2, j1, j2 in group:
+            if tag == "equal":
+                rows += [{"kind": "same", "text": l} for l in a[i1:i2]]
+            else:
+                rows += [{"kind": "removed", "text": l} for l in a[i1:i2] if l.strip()]
+                rows += [{"kind": "added", "text": l} for l in b[j1:j2] if l.strip()]
+    return rows
+
+
 def _interview_context(interview):
     turns = list(interview.turns.all())
     current = turns[-1] if turns and turns[-1].role == InterviewTurn.Role.ANALYST else None
@@ -66,28 +88,32 @@ def _interview_context(interview):
     ]
     covered = sum(1 for c in coverage if c["level"] >= 2)
     draft = interview.draft or {}
+    brief = BrandBrief.current()
+    changes = []
+    if draft:
+        changes = line_changes(brief.prompt_text, compose_prompt_text(
+            draft.get("vision", ""), draft.get("mission", ""), draft.get("goals", []), draft.get("brief", "")))
     return {
         "interview": interview,
         "turns": turns[:-1] if current else turns,
         "current": current,
+        # The analyst said the picture is complete instead of asking another question.
+        "finished": current is not None and not current.text,
         "coverage": coverage,
         "covered": covered,
         "ready": bool(interview.coverage.get("ready")) or covered == len(coverage),
         "answered": sum(1 for t in turns if t.role == InterviewTurn.Role.FOUNDER),
         "current_area_label": BRAND_AREAS.get(current.area, current.area) if current else "",
         "draft": draft,
-        "draft_short_goals": "\n".join(_goal_line(g) for g in draft.get("goals", []) if g.get("horizon") != "long"),
-        "draft_long_goals": "\n".join(_goal_line(g) for g in draft.get("goals", []) if g.get("horizon") == "long"),
-        "brief": BrandBrief.current(),
+        "draft_short_goals": [g for g in draft.get("goals", []) if g.get("horizon") != "long"],
+        "draft_long_goals": [g for g in draft.get("goals", []) if g.get("horizon") == "long"],
+        "brief": brief,
+        "line_changes": changes,
+        "added_count": sum(1 for r in changes if r["kind"] == "added"),
+        "removed_count": sum(1 for r in changes if r["kind"] == "removed"),
         "limit": settings.FDW_INTERVIEW_LIMIT_USD,
         "analyst_model": interview.model,
     }
-
-
-def _goal_line(goal):
-    extras = [goal.get("measure", ""), goal.get("by_when", "")]
-    extras = [e for e in extras if e]
-    return goal.get("goal", "") + (f" ({'; '.join(extras)})" if extras else "")
 
 
 @login_required
@@ -163,8 +189,7 @@ def interview_approve(request, pk):
     current = get_object_or_404(BrandInterview, pk=pk)
     try:
         analyst.approve(current, request.POST.get("vision", ""), request.POST.get("mission", ""),
-                        request.POST.get("short_goals", ""), request.POST.get("long_goals", ""),
-                        request.POST.get("text", ""))
+                        analyst.goals_from_form(request.POST), request.POST.get("text", ""))
     except analyst.AnalystError as exc:
         messages.error(request, str(exc))
         return redirect("brand_interview")

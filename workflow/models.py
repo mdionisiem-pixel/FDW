@@ -71,13 +71,6 @@ class BrandBrief(models.Model):
     def goals_text(self) -> str:
         return "\n".join(goal_line(g) for g in self.goals)
 
-    @property
-    def short_goals_text(self) -> str:
-        return "\n".join(goal_line(g) for g in self.short_goals)
-
-    @property
-    def long_goals_text(self) -> str:
-        return "\n".join(goal_line(g) for g in self.long_goals)
 
     @property
     def prompt_text(self) -> str:
@@ -85,16 +78,7 @@ class BrandBrief(models.Model):
 
         Designs, research and reviews are judged against where the brand is going,
         not only what it is today."""
-        parts = []
-        if self.vision.strip():
-            parts.append("VISION\n" + self.vision.strip())
-        if self.mission.strip():
-            parts.append("MISSION\n" + self.mission.strip())
-        for heading, goals in ((SHORT_HEADING, self.short_goals), (LONG_HEADING, self.long_goals)):
-            if goals:
-                parts.append(heading + "\n" + "\n".join("- " + goal_line(g) for g in goals))
-        parts.append(self.text.strip())
-        return "\n\n".join(parts)
+        return compose_prompt_text(self.vision, self.mission, self.goals, self.text)
 
     def snapshot(self, source: str, note: str = "") -> "BrandBriefVersion":
         return BrandBriefVersion.objects.create(
@@ -106,6 +90,21 @@ class BrandBrief(models.Model):
 SHORT, LONG = "short", "long"
 SHORT_HEADING = "SHORT-TERM GOALS (the next 12 months)"
 LONG_HEADING = "LONG-TERM GOALS (3 to 5 years)"
+
+
+def compose_prompt_text(vision: str, mission: str, goals: list, text: str) -> str:
+    """The text every prompt receives, built the same way for the brief and for a draft of it."""
+    parts = []
+    if vision.strip():
+        parts.append("VISION\n" + vision.strip())
+    if mission.strip():
+        parts.append("MISSION\n" + mission.strip())
+    for horizon, heading in ((SHORT, SHORT_HEADING), (LONG, LONG_HEADING)):
+        chosen = [g for g in goals if goal_horizon(g) == horizon]
+        if chosen:
+            parts.append(heading + "\n" + "\n".join("- " + goal_line(g) for g in chosen))
+    parts.append(text.strip())
+    return "\n\n".join(parts)
 
 
 def goal_horizon(goal: dict) -> str:

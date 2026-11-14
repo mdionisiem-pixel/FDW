@@ -895,6 +895,9 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .turn-reflection { color: var(--ink-soft); font-style: italic; margin: 0 0 0.25rem; }
 
 .question-card { background: var(--paper); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 1.1rem 1.2rem; margin: 1rem 0; box-shadow: 0 6px 18px -12px rgba(27, 33, 64, 0.35); scroll-margin-top: 1rem; }
+.question-card-ready { border-color: var(--moss); background: var(--moss-wash); }
+.question-card-ready .answer-form textarea { min-height: 4rem; }
+.ready-more { margin: 0.75rem 0 0; }
 .question-area { margin: 0 0 0.35rem; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.75rem; }
 .question-text { font-size: 1.25rem; line-height: 1.35; margin: 0.2rem 0 0.4rem; }
 .answer-form { display: grid; gap: 0.6rem; margin-top: 0.75rem; }
@@ -913,3 +916,30 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .interview-actions > p { flex-basis: 100%; margin: 0; }
 .interview-actions.is-ready { background: var(--moss-wash); border-radius: var(--radius); padding: 0.75rem 1rem; }
 @media (max-width: 600px) { .work-card-compact { grid-template-columns: 1fr; } .turn { max-width: 100%; } }
+
+/* Goal rows: one goal per row with separate fields */
+.goal-rows { border: 1.5px solid var(--line); border-radius: var(--radius); padding: 0.75rem 0.9rem; margin: 0.25rem 0 0.5rem; display: grid; gap: 0.4rem; }
+.goal-rows legend { font-weight: 600; padding: 0 0.3rem; }
+.goal-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.3fr) minmax(0, 1fr); gap: 0.4rem; }
+.goal-row input { width: 100%; box-sizing: border-box; min-width: 0; }
+.goal-row-head { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); }
+.goal-rows [data-add-goal] { justify-self: start; padding-left: 0; }
+.goal-rows > .meta { margin: 0; }
+@media (max-width: 600px) {
+  .goal-row { grid-template-columns: 1fr 1fr; }
+  .goal-row input[name$="_goal"] { grid-column: 1 / -1; }
+  .goal-row-head { display: none; }
+  .goal-row + .goal-row { border-top: 1.5px dashed var(--line); padding-top: 0.4rem; }
+}
+
+/* Draft review: the app's own checks and line-by-line changes */
+.draft-checks { border-color: var(--floss); background: var(--floss-wash); }
+.line-changes { list-style: none; margin: 0.5rem 0 0; padding: 0; font-size: 0.86rem; border: 1.5px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.lc { padding: 0.2rem 0.6rem 0.2rem 1.8rem; position: relative; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--paper); }
+.lc-mark { position: absolute; left: 0.6rem; font-weight: 700; }
+.lc-added { background: var(--moss-wash); }
+.lc-added .lc-mark { color: var(--moss); }
+.lc-removed { background: var(--floss-wash); text-decoration: line-through; text-decoration-color: rgba(155, 24, 72, 0.4); }
+.lc-removed .lc-mark { color: var(--floss-deep); }
+.lc-same { color: var(--ink-soft); }
+.lc-gap { text-align: center; color: var(--ink-soft); background: var(--chalk); padding-left: 0.6rem; }

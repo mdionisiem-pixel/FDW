@@ -1,0 +1,21 @@
+{# Editable goals for one horizon: one row per goal, with separate fields, so nothing has to be parsed back out of text. #}
+<fieldset class="goal-rows" data-goal-rows>
+  <legend>{{ title }} <span class="meta">{{ span }}</span></legend>
+  <div class="goal-row goal-row-head" aria-hidden="true"><span>Goal</span><span>Measure</span><span>By when</span></div>
+  {% for g in goals %}
+    <div class="goal-row">
+      <input type="text" name="{{ horizon }}_goal" value="{{ g.goal }}" aria-label="Goal" maxlength="300">
+      <input type="text" name="{{ horizon }}_measure" value="{{ g.measure }}" aria-label="Measure" maxlength="200">
+      <input type="text" name="{{ horizon }}_by" value="{{ g.by_when }}" aria-label="By when" maxlength="100">
+    </div>
+  {% endfor %}
+  {% for _ in "12" %}
+    <div class="goal-row">
+      <input type="text" name="{{ horizon }}_goal" aria-label="Goal" maxlength="300" placeholder="New goal">
+      <input type="text" name="{{ horizon }}_measure" aria-label="Measure" maxlength="200" placeholder="e.g. 40 pieces">
+      <input type="text" name="{{ horizon }}_by" aria-label="By when" maxlength="100" placeholder="e.g. March 2027">
+    </div>
+  {% endfor %}
+  <button type="button" class="btn btn-quiet" data-add-goal>Add another goal</button>
+  <p class="meta">Leave a goal empty to remove it.</p>
+</fieldset>
