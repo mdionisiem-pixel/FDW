@@ -112,3 +112,66 @@ class Stage4PaymentTests(TestCase):
         self.assertEqual(attempt.status, ShotAttempt.Status.WAITING)
         self.assertEqual(attempt.error_count, 0)
         self.assertEqual(PieceVisuals.objects.filter(cycle=self.cycle, status="making").count(), 1)
+
+
+@override_settings(OPENROUTER_API_KEY="k")
+class TooLargeTests(TestCase):
+    def test_weight_exceeds_budget_is_its_own_error(self):
+        client = bakeoff.OpenRouterImages()
+        with mock.patch("urllib.request.urlopen",
+                        side_effect=http_402("weight_exceeds_budget", "openrouter_credits")):
+            with self.assertRaises(bakeoff.TooLargeForBudget) as caught:
+                client._request("POST", "/images", {})
+        self.assertIn("Nothing was charged", str(caught.exception))
+
+
+@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=False, OPENROUTER_API_KEY="k",
+                   FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3,
+                   FDW_REFERENCE_EDGE=1024, FDW_REFERENCE_FALLBACK_EDGE=640)
+class ReferenceSizeTests(TestCase):
+    def setUp(self):
+        self.cycle = sourced_cycle()
+        visuals.start_stage4(self.cycle)
+        sets = list(PieceVisuals.objects.filter(cycle=self.cycle))
+        PieceVisuals.objects.filter(pk__in=[v.pk for v in sets[1:]]).update(status=PieceVisuals.Status.REJECTED)
+        visuals.work_next(self.cycle, client=ReviewClient(), image_client=FakeImages())  # prompts
+        visuals.work_next(self.cycle, client=ReviewClient(), image_client=FakeImages())  # shot A, passes
+
+    def test_references_are_small_jpegs(self):
+        seen = []
+        images = FakeImages()
+        original = images.generate
+
+        def spy(model, prompt, references):
+            seen.extend(references)
+            return original(model, prompt, references)
+
+        images.generate = spy
+        visuals.work_next(self.cycle, client=ReviewClient(), image_client=images)
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].startswith("data:image/jpeg;base64,"))
+
+    def test_too_large_is_retried_once_with_smaller_references(self):
+        calls = []
+        images = FakeImages()
+        original = images.generate
+
+        def first_too_large(model, prompt, references):
+            calls.append(len(references[0]))
+            if len(calls) == 1:
+                raise bakeoff.TooLargeForBudget("too large")
+            return original(model, prompt, references)
+
+        images.generate = first_too_large
+        result = visuals.work_next(self.cycle, client=ReviewClient(), image_client=images)
+        self.assertEqual(result["state"], "worked")
+        self.assertEqual(len(calls), 2)
+        self.assertLessEqual(calls[1], calls[0])
+
+    def test_still_too_large_stops_without_using_an_attempt(self):
+        images = FakeImages()
+        with mock.patch.object(images, "generate", side_effect=bakeoff.TooLargeForBudget("too large")):
+            with self.assertRaises(bakeoff.TooLargeForBudget):
+                visuals.work_next(self.cycle, client=ReviewClient(), image_client=images)
+        b = ShotAttempt.objects.get(visuals__cycle=self.cycle, shot="B", attempt=1)
+        self.assertEqual((b.status, b.error_count), (ShotAttempt.Status.WAITING, 0))

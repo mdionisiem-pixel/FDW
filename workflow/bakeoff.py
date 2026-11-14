@@ -59,6 +59,14 @@ class OutOfCredit(BakeoffError):
     """OpenRouter refused the request for lack of credit. Retrying will not help until credit is added."""
 
 
+class TooLargeForBudget(OutOfCredit):
+    """One request's estimated cost is bigger than OpenRouter's whole in-flight budget.
+
+    OpenRouter estimates a request from its input, and reference images sent
+    inline count as input, so smaller references can bring it back under.
+    """
+
+
 class BudgetBusy(BakeoffError):
     """OpenRouter's in-flight budget is full: requests already running hold the credit. Retry shortly.
 
@@ -322,8 +330,12 @@ class OpenRouterImages:
             text = ("This OpenRouter key has reached its own credit limit. Raise the key's limit, or wait for it to "
                     "reset, at https://openrouter.ai/settings/keys.")
         elif reason == "weight_exceeds_budget":
-            text = ("One image costs more than OpenRouter lets a balance this size hold at once. Add credits at "
-                    "https://openrouter.ai/settings/credits.")
+            return TooLargeForBudget(
+                "OpenRouter returned 402. OpenRouter estimates this image, with its reference images, at more than "
+                "it will hold against your current balance at once. Adding credit at "
+                "https://openrouter.ai/settings/credits removes the limit. Nothing was charged for this image; "
+                "press the button again once that is done."
+            )
         else:
             text = "Your OpenRouter balance cannot cover the next image. Add credits at https://openrouter.ai/settings/credits."
         return OutOfCredit(f"OpenRouter returned 402. {text} Nothing was charged for this image; "
@@ -440,16 +452,31 @@ def get_image_client():
     return SampleImages() if settings.FDW_DRY_RUN else OpenRouterImages()
 
 
-def _data_url(field_file):
+def reference_url(field_file, edge=None):
+    """A reference image as a small JPEG data URL.
+
+    References are sent inside the request, and OpenRouter counts them toward
+    the request's estimated cost, so a full-size PNG can make one image look
+    too expensive to a small balance. The image model only needs enough
+    detail to keep the piece the same.
+    """
+    from PIL import Image
+
     field_file.open("rb")
     try:
         data = field_file.read()
     finally:
         field_file.close()
-    kind = sniff(data)
-    if kind is None:
+    if sniff(data) is None:
         return None
-    return f"data:{kind[0]};base64,{base64.b64encode(data).decode('ascii')}"
+    edge = edge or settings.FDW_REFERENCE_EDGE
+    with Image.open(io.BytesIO(data)) as opened:
+        opened.load()
+        image = opened.convert("RGB")
+    image.thumbnail((edge, edge), Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=85, optimize=True)
+    return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def next_job(piece: BakeoffPiece):
@@ -478,7 +505,7 @@ def make_next_image(piece: BakeoffPiece, client=None):
     references = []
     if image.shot != "A":
         front = piece.images.get(model=image.model, shot="A")
-        reference = _data_url(front.file) if not getattr(client, "dry_run", False) else None
+        reference = reference_url(front.file) if not getattr(client, "dry_run", False) else None
         if reference:
             references.append(reference)
     started = time.monotonic()
