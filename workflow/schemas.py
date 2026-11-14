@@ -921,3 +921,81 @@ def validate_image_review(data, max_minor=None):
         "verdict_overridden": decided != verdict,
         "correction_note": note if decided == "fail" else "",
     }
+
+
+# --- Brand analyst interview --------------------------------------------------
+
+
+def validate_analyst_turn(data, areas):
+    """One interview turn: a single question, its area, example answers and coverage.
+
+    Coverage is clamped to 0-3 and missing areas keep 0, so a slightly sloppy
+    answer still moves the interview on; a missing question does not."""
+    if not isinstance(data, dict):
+        raise SchemaError(["Expected a JSON object for the turn."])
+    problems = []
+    if not _is_text(data.get("question")):
+        problems.append("question must be a non-empty string")
+    area = str(data.get("area") or "").strip()
+    if area not in areas:
+        problems.append(f"area must be one of {sorted(areas)}")
+    if problems:
+        raise SchemaError(problems)
+    examples = [str(e).strip() for e in (data.get("examples") or []) if _is_text(e)][:4]
+    raw = data.get("coverage") if isinstance(data.get("coverage"), dict) else {}
+    coverage = {}
+    for key in areas:
+        try:
+            coverage[key] = max(0, min(3, int(raw.get(key, 0))))
+        except (TypeError, ValueError):
+            coverage[key] = 0
+    return {
+        "reflection": str(data.get("reflection") or "").strip(),
+        "question": data["question"].strip(),
+        "why": str(data.get("why") or "").strip(),
+        "area": area,
+        "examples": examples,
+        "coverage": coverage,
+        "ready_to_draft": bool(data.get("ready_to_draft")),
+    }
+
+
+def validate_brand_draft(data):
+    """The analyst's draft of vision, mission, goals and brief."""
+    if not isinstance(data, dict):
+        raise SchemaError(["Expected a JSON object for the draft."])
+    problems = []
+    for key in ("vision", "mission", "brief"):
+        if not _is_text(data.get(key)):
+            problems.append(f"{key} must be a non-empty string")
+    goals = data.get("goals")
+    if not isinstance(goals, list) or not goals:
+        problems.append("goals must be a non-empty list")
+        goals = []
+    clean_goals = []
+    for index, goal in enumerate(goals):
+        if not isinstance(goal, dict) or not _is_text(goal.get("goal")):
+            problems.append(f"goals[{index}] needs a goal")
+            continue
+        horizon = str(goal.get("horizon") or "").strip().lower()
+        if horizon not in ("short", "long"):
+            problems.append(f"goals[{index}].horizon must be short or long")
+            continue
+        clean = {k: str(goal.get(k) or "").strip() for k in ("goal", "measure", "by_when")}
+        clean["horizon"] = horizon
+        clean_goals.append(clean)
+    if problems:
+        raise SchemaError(problems)
+    to_confirm = [str(c).strip() for c in (data.get("to_confirm") or []) if _is_text(c)]
+    # Both horizons matter; a missing one is put in front of the founder, never left silent.
+    for horizon, words in (("short", "short-term goals (the next 12 months)"), ("long", "long-term goals (3 to 5 years)")):
+        if not any(g["horizon"] == horizon for g in clean_goals):
+            to_confirm.append(f"No {words} were set. Add them before approving, or continue the interview.")
+    return {
+        "vision": data["vision"].strip(),
+        "mission": data["mission"].strip(),
+        "goals": clean_goals,
+        "brief": data["brief"].strip(),
+        "changes": [str(c).strip() for c in (data.get("changes") or []) if _is_text(c)],
+        "to_confirm": to_confirm,
+    }

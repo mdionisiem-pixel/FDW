@@ -6,14 +6,18 @@ decision or a model call are read-only here, so the audit trail stays intact.
 from django.contrib import admin
 
 from .models import (
+    AnalystCall,
     Approval,
     BakeoffImage,
     BakeoffPiece,
     BrandBrief,
+    BrandBriefVersion,
+    BrandInterview,
     Concept,
     ConceptReview,
     Cycle,
     DemandBrief,
+    InterviewTurn,
     ModelCall,
     Piece,
     RawItem,
@@ -135,3 +139,31 @@ class SourcingCheckAdmin(ReadOnlyAdmin):
     list_display = ("cycle", "status", "created_at", "decided_at")
     list_filter = ("status",)
     inlines = [SourcingResultInline]
+
+
+@admin.register(BrandBriefVersion)
+class BrandBriefVersionAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "source", "note")
+    list_filter = ("source",)
+
+
+class InterviewTurnInline(admin.TabularInline):
+    model = InterviewTurn
+    extra = 0
+    fields = ("role", "area", "text", "cost_usd", "created_at")
+    readonly_fields = fields
+    can_delete = False
+
+
+@admin.register(BrandInterview)
+class BrandInterviewAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "status", "model", "cost_usd")
+    list_filter = ("status",)
+    inlines = [InterviewTurnInline]
+
+
+@admin.register(AnalystCall)
+class AnalystCallAdmin(ReadOnlyAdmin):
+    list_display = ("created_at", "interview", "kind", "model", "provider", "seconds", "output_tokens",
+                    "finish_reason", "cost_usd", "ok")
+    list_filter = ("kind", "ok", "model")

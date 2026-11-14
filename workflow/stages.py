@@ -199,7 +199,7 @@ def run_stage1(cycle: Cycle, client=None) -> DemandBrief:
             "Decide on that brief before running the stage again."
         )
     client = client or get_client()
-    brand_brief = BrandBrief.current().text
+    brand_brief = BrandBrief.current().prompt_text
 
     extracted = []
     raw_items = list(cycle.raw_items.all())
@@ -367,7 +367,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
             "Stage 2 needs an approved research brief. Approve the brief at gate 1 first."
         )
     client = client or get_client()
-    brand_brief = BrandBrief.current().text
+    brand_brief = BrandBrief.current().prompt_text
 
     # Planning and specifying are separate calls. Three fully specified
     # collections do not fit in one answer, and a cut-off answer saves nothing.

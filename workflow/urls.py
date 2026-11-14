@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views, views_bakeoff
+from . import views, views_bakeoff, views_brand
 
 urlpatterns = [
     path("bakeoff/", views_bakeoff.home, name="bakeoff_home"),
@@ -21,7 +21,16 @@ urlpatterns = [
     path("bakeoff/images/<int:image_pk>/", views_bakeoff.image_file, name="bakeoff_image"),
     path("", views.dashboard, name="dashboard"),
     path("cycles/new/", views.create_cycle, name="create_cycle"),
-    path("brand-brief/", views.brand_brief, name="brand_brief"),
+    path("brand-brief/", views_brand.brand_brief, name="brand_brief"),
+    path("brand-brief/versions/<int:pk>/restore/", views_brand.restore_version, name="brand_restore"),
+    path("brand-brief/interview/", views_brand.interview, name="brand_interview"),
+    path("brand-brief/interview/start/", views_brand.interview_start, name="brand_interview_start"),
+    path("brand-brief/interview/<int:pk>/answer/", views_brand.interview_answer, name="brand_interview_answer"),
+    path("brand-brief/interview/<int:pk>/retry/", views_brand.interview_retry, name="brand_interview_retry"),
+    path("brand-brief/interview/<int:pk>/draft/", views_brand.interview_draft, name="brand_interview_draft"),
+    path("brand-brief/interview/<int:pk>/resume/", views_brand.interview_resume, name="brand_interview_resume"),
+    path("brand-brief/interview/<int:pk>/approve/", views_brand.interview_approve, name="brand_interview_approve"),
+    path("brand-brief/interview/<int:pk>/close/", views_brand.interview_close, name="brand_interview_close"),
     path("cycles/<int:pk>/", views.cycle_detail, name="cycle_detail"),
     path("cycles/<int:pk>/items/", views.add_items, name="add_items"),
     path("cycles/<int:pk>/items/<int:item_pk>/delete/", views.delete_item, name="delete_item"),

@@ -1,0 +1,10 @@
+{# A compact working card for one request at a time: loader, caption and elapsed time. #}
+{# Fixed size, like the work card, so the rotating caption never moves it. #}
+<div class="inline-working work-card work-card-compact" hidden>
+  <div class="loaders inline-loaders" aria-hidden="true"></div>
+  <div class="work-body">
+    <p class="work-title">{{ title }}</p>
+    <p class="working-quip" aria-hidden="true"></p>
+    <dl class="work-stats"><div><dt>Elapsed</dt><dd data-stat="elapsed">0 s</dd></div></dl>
+  </div>
+</div>

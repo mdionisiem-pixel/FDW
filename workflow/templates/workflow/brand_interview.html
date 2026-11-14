@@ -1,0 +1,82 @@
+{% extends "workflow/base.html" %}
+{% block title %}Brand interview | Malina studio{% endblock %}
+{% block content %}
+<section class="page page-narrow">
+  <p class="meta"><a href="{% url 'brand_brief' %}">Brand brief</a></p>
+  <h1>{% if interview.status == "drafted" %}Review the analyst's draft{% else %}Brand interview{% endif %}</h1>
+
+  <div class="coverage" aria-label="How well each area is covered">
+    <p class="meta">{{ covered }} of {{ coverage|length }} areas clear · {{ answered }} answer{{ answered|pluralize }} · ${{ interview.cost_usd|floatformat:2 }} of ${{ limit|floatformat:2 }} · {{ analyst_model }}</p>
+    <ol class="coverage-list">
+      {% for c in coverage %}<li class="coverage-item level-{{ c.level }}" title="{{ c.label }}: {{ c.word }}"><span class="coverage-dots" aria-hidden="true"><i></i><i></i><i></i></span>{{ c.label }}<span class="visually-hidden">: {{ c.word }}</span></li>{% endfor %}
+    </ol>
+  </div>
+
+  {% if interview.status == "drafted" %}
+    {% include "workflow/includes/brand_draft.html" %}
+  {% else %}
+    {% if turns %}
+      <details class="fold transcript-fold"{% if answered <= 3 %} open{% endif %}>
+        <summary>The conversation so far</summary>
+        <ol class="transcript">
+          {% for t in turns %}
+            <li class="turn turn-{{ t.role }}">
+              {% if t.role == "analyst" %}
+                {% if t.reflection %}<p class="turn-reflection">{{ t.reflection }}</p>{% endif %}
+                <p class="turn-text">{{ t.text }}</p>
+              {% else %}
+                <p class="turn-text">{{ t.text|linebreaksbr }}</p>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ol>
+      </details>
+    {% endif %}
+
+    {% if current %}
+      <div class="question-card" id="current">
+        <p class="meta question-area">{{ current_area_label }} · question {{ answered|add:1 }}</p>
+        {% if current.reflection %}<p class="turn-reflection">{{ current.reflection }}</p>{% endif %}
+        <h2 class="question-text">{{ current.text }}</h2>
+        {% if current.why %}<p class="meta">Why it matters: {{ current.why }}</p>{% endif %}
+
+        <form class="answer-form" id="answer-form" method="post" action="{% url 'brand_interview_answer' interview.pk %}" data-url="{% url 'brand_interview_answer' interview.pk %}" data-loader="hoop" data-quips="analyst">
+          {% include "workflow/includes/thinking_card.html" with title="The analyst is thinking" %}
+          {% csrf_token %}
+          {% if current.examples %}
+            <div class="examples" role="group" aria-label="Example answers: tap one to start from it">
+              {% for e in current.examples %}<button type="button" class="chip example-chip">{{ e }}</button>{% endfor %}
+              <button type="button" class="chip chip-quiet example-chip" data-answer="skip">Skip</button>
+            </div>
+          {% endif %}
+          <label for="answer" class="visually-hidden">Your answer</label>
+          <textarea id="answer" name="answer" rows="4" maxlength="4000" placeholder="Your answer, in your own words. Examples above are only a starting point." required></textarea>
+          <p class="form-error" id="answer-error" role="alert" hidden></p>
+          <div class="form-foot">
+            <p class="meta">Ctrl+Enter or Cmd+Enter sends.</p>
+            <button class="btn btn-primary" type="submit" id="answer-button">Send answer</button>
+          </div>
+        </form>
+      </div>
+    {% else %}
+      <aside class="callout callout-stack">
+        <p><strong>The next question did not arrive.</strong> {% if interview.error %}{{ interview.error }}{% endif %} Your answers are saved.</p>
+        <form method="post" action="{% url 'brand_interview_retry' interview.pk %}" data-working="The analyst is preparing the next question" data-loader="hoop" data-quips="analyst">
+          {% csrf_token %}<button class="btn btn-primary" type="submit">Ask the next question</button>
+        </form>
+      </aside>
+    {% endif %}
+
+    <div class="interview-actions{% if ready %} is-ready{% endif %}">
+      {% if ready %}<p><strong>The analyst has enough to write the draft.</strong> You can still answer more to sharpen it.</p>{% endif %}
+      <form method="post" action="{% url 'brand_interview_draft' interview.pk %}" data-working="The analyst is writing your vision, mission, goals and brief" data-loader="spool" data-quips="analyst">
+        {% csrf_token %}
+        <button class="btn{% if ready %} btn-primary{% endif %}" type="submit" {% if not answered %}disabled{% endif %}>Write the draft now</button>
+      </form>
+      <form method="post" action="{% url 'brand_interview_close' interview.pk %}">
+        {% csrf_token %}<button class="btn btn-quiet" type="submit">End without changes</button>
+      </form>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

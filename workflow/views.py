@@ -228,24 +228,6 @@ def create_cycle(request):
 
 
 @login_required
-def brand_brief(request):
-    brief = BrandBrief.current()
-    if request.method == "POST":
-        text = request.POST.get("text", "").strip()
-        if not text:
-            messages.error(request, "The brand brief cannot be empty. Every prompt depends on it.")
-        else:
-            brief.text = text
-            brief.save()
-            messages.success(request, "Brand brief saved. It applies to every stage run from now on.")
-            return redirect("brand_brief")
-    return render(request, "workflow/brand_brief.html", {
-        "brief": brief,
-        "dry_run": settings.FDW_DRY_RUN,
-    })
-
-
-@login_required
 def cycle_detail(request, pk):
     cycle = get_object_or_404(Cycle, pk=pk)
     raw_items = list(cycle.raw_items.all())

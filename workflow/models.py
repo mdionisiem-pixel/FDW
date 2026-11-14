@@ -34,8 +34,12 @@ Hard rules:
 
 
 class BrandBrief(models.Model):
-    """The single brand brief inserted into every prompt."""
+    """The single brand brief inserted into every prompt, with the vision, mission and goals it serves."""
 
+    vision = models.TextField(blank=True)
+    mission = models.TextField(blank=True)
+    # Each goal: {"goal": "", "measure": "", "by_when": "", "horizon": "short" | "long"}
+    goals = models.JSONField(default=list, blank=True)
     text = models.TextField(default=DEFAULT_BRAND_BRIEF)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -53,7 +57,171 @@ class BrandBrief(models.Model):
 
     @property
     def unconfirmed_lines(self) -> int:
-        return self.text.count("(To confirm)")
+        return sum(part.count("(To confirm)") for part in (self.vision, self.mission, self.goals_text, self.text))
+
+    @property
+    def short_goals(self) -> list:
+        return [g for g in self.goals if goal_horizon(g) == SHORT]
+
+    @property
+    def long_goals(self) -> list:
+        return [g for g in self.goals if goal_horizon(g) == LONG]
+
+    @property
+    def goals_text(self) -> str:
+        return "\n".join(goal_line(g) for g in self.goals)
+
+    @property
+    def short_goals_text(self) -> str:
+        return "\n".join(goal_line(g) for g in self.short_goals)
+
+    @property
+    def long_goals_text(self) -> str:
+        return "\n".join(goal_line(g) for g in self.long_goals)
+
+    @property
+    def prompt_text(self) -> str:
+        """What every prompt receives: vision, mission and goals first, then the brief.
+
+        Designs, research and reviews are judged against where the brand is going,
+        not only what it is today."""
+        parts = []
+        if self.vision.strip():
+            parts.append("VISION\n" + self.vision.strip())
+        if self.mission.strip():
+            parts.append("MISSION\n" + self.mission.strip())
+        for heading, goals in ((SHORT_HEADING, self.short_goals), (LONG_HEADING, self.long_goals)):
+            if goals:
+                parts.append(heading + "\n" + "\n".join("- " + goal_line(g) for g in goals))
+        parts.append(self.text.strip())
+        return "\n\n".join(parts)
+
+    def snapshot(self, source: str, note: str = "") -> "BrandBriefVersion":
+        return BrandBriefVersion.objects.create(
+            vision=self.vision, mission=self.mission, goals=self.goals, text=self.text, source=source, note=note[:200])
+
+
+# Goals are kept in two horizons: what the next twelve months must deliver, and
+# where the brand should be in three to five years. Designs are judged against both.
+SHORT, LONG = "short", "long"
+SHORT_HEADING = "SHORT-TERM GOALS (the next 12 months)"
+LONG_HEADING = "LONG-TERM GOALS (3 to 5 years)"
+
+
+def goal_horizon(goal: dict) -> str:
+    """A goal saved before horizons existed counts as short-term."""
+    return LONG if goal.get("horizon") == LONG else SHORT
+
+
+def goal_line(goal: dict) -> str:
+    text = str(goal.get("goal", "")).strip()
+    extras = [str(goal.get(k, "")).strip() for k in ("measure", "by_when")]
+    extras = [e for e in extras if e]
+    return text + (f" ({'; '.join(extras)})" if extras else "")
+
+
+class BrandBriefVersion(models.Model):
+    """A saved copy of the brief, made every time it changes, so nothing approved is ever lost."""
+
+    class Source(models.TextChoices):
+        HAND = "hand", "Edited by hand"
+        INTERVIEW = "interview", "From the analyst interview"
+        BEFORE = "before", "Before a change"
+
+    vision = models.TextField(blank=True)
+    mission = models.TextField(blank=True)
+    goals = models.JSONField(default=list, blank=True)
+    text = models.TextField()
+    source = models.CharField(max_length=10, choices=Source.choices)
+    note = models.CharField(max_length=200, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+
+class BrandInterview(models.Model):
+    """A business analyst interviewing the founder about vision, mission, goals and brand.
+
+    One question per turn. When enough is covered, the analyst drafts a new
+    vision, mission, goals and brief; the founder edits and approves it before
+    it reaches any prompt."""
+
+    class Status(models.TextChoices):
+        ASKING = "asking", "Interviewing"
+        DRAFTED = "drafted", "Draft ready for review"
+        APPROVED = "approved", "Approved"
+        CLOSED = "closed", "Closed without changes"
+
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ASKING)
+    model = models.CharField(max_length=120)
+    # The brief as it stood when the interview began, which the analyst builds on.
+    starting_brief = models.TextField(blank=True)
+    # The analyst's latest view of how well each area is covered: {area: 0-3}.
+    coverage = models.JSONField(default=dict, blank=True)
+    draft = models.JSONField(null=True, blank=True)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    @property
+    def open(self) -> bool:
+        return self.status in (self.Status.ASKING, self.Status.DRAFTED)
+
+    @property
+    def answered(self) -> int:
+        return self.turns.filter(role=InterviewTurn.Role.FOUNDER).count()
+
+
+class AnalystCall(models.Model):
+    """One call to the analyst model, kept so a bad question or draft can be traced to what was sent and returned."""
+
+    interview = models.ForeignKey(BrandInterview, on_delete=models.CASCADE, related_name="calls")
+    kind = models.CharField(max_length=20)  # question, question_retry, draft, draft_retry
+    model = models.CharField(max_length=120)
+    provider = models.CharField(max_length=80, blank=True)
+    prompt = models.TextField()
+    response = models.TextField(blank=True)
+    finish_reason = models.CharField(max_length=30, blank=True)
+    max_tokens = models.PositiveIntegerField(default=0)
+    input_tokens = models.PositiveIntegerField(default=0)
+    output_tokens = models.PositiveIntegerField(default=0)
+    seconds = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    ok = models.BooleanField(default=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.kind} ({self.model}, {self.seconds}s)"
+
+
+class InterviewTurn(models.Model):
+    class Role(models.TextChoices):
+        ANALYST = "analyst", "Analyst"
+        FOUNDER = "founder", "Founder"
+
+    interview = models.ForeignKey(BrandInterview, on_delete=models.CASCADE, related_name="turns")
+    role = models.CharField(max_length=8, choices=Role.choices)
+    text = models.TextField()
+    # Analyst turns only: what it took from the last answer, why the question matters,
+    # which area it covers, and example answers the founder can tap.
+    reflection = models.TextField(blank=True)
+    why = models.TextField(blank=True)
+    area = models.CharField(max_length=30, blank=True)
+    examples = models.JSONField(default=list, blank=True)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
 
 
 # Model calls whose step starts with this belong to stage 4 and count toward its budget.
