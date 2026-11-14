@@ -245,6 +245,13 @@ FDW_MAX_SHOT_ATTEMPTS = int(os.environ.get("FDW_MAX_SHOT_ATTEMPTS", "3"))
 # How many images the page makes at the same time. Pieces do not depend on
 # each other, so several can be worked on at once.
 FDW_VISUAL_WORKERS = int(os.environ.get("FDW_VISUAL_WORKERS", "2"))
+# Longest side, in pixels, of the reference images sent with shots B to E (and
+# the image test's C and D). They are sent inside the request, and OpenRouter
+# counts them toward its cost estimate, so smaller references keep requests
+# within a small balance. If OpenRouter still refuses one as too large, it is
+# retried once with references at the fallback size.
+FDW_REFERENCE_EDGE = int(os.environ.get("FDW_REFERENCE_EDGE", "1024"))
+FDW_REFERENCE_FALLBACK_EDGE = int(os.environ.get("FDW_REFERENCE_FALLBACK_EDGE", "640"))
 # Longest side, in pixels, of the images the reviewer looks at. Larger shows
 # more stitch detail and costs more per review.
 FDW_REVIEW_IMAGE_EDGE = int(os.environ.get("FDW_REVIEW_IMAGE_EDGE", "1568"))

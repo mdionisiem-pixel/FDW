@@ -34,7 +34,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from . import prompts, schemas
-from .bakeoff import BakeoffError, BudgetBusy, get_image_client, sniff
+from .bakeoff import BakeoffError, BudgetBusy, OutOfCredit, TooLargeForBudget, get_image_client, reference_url, sniff
 from .llm import SpendLimitError, StageError, get_client, run_json
 from .models import (
     SHOTS,
@@ -52,9 +52,6 @@ REFERENCES = {"A": (), "B": ("A",), "C": ("A",), "D": ("A", "B"), "E": ("A", "D"
 CONCEPT_LABEL = "Concept render. The finished piece may differ slightly."
 # A unit whose worker vanished (closed tab, server restart) is offered again after this.
 STALE_AFTER = timedelta(minutes=15)
-# Reference images are sent to the image model as JPEG at this size, which
-# keeps each request small without losing the detail the model copies.
-REFERENCE_EDGE = 2048
 
 DECISIONS = {
     "approve": "approved",
@@ -364,15 +361,22 @@ def make_attempt(attempt: ShotAttempt, client=None, image_client=None) -> ShotAt
 
     if not attempt.file:
         refs = _references(visuals, attempt.shot)
-        urls = []
-        if not sample_images:
-            for ref in refs:
-                if _is_raster(ref.file):
-                    jpeg = _as_jpeg(_read(ref.file), REFERENCE_EDGE, 92)
-                    urls.append("data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii"))
+        def reference_urls(edge):
+            if sample_images:
+                return []
+            return [url for url in (reference_url(r.file, edge) for r in refs if _is_raster(r.file)) if url]
+
+        urls = reference_urls(settings.FDW_REFERENCE_EDGE)
         started = time.monotonic()
         try:
-            data, (media_type, ext), cost = image_client.generate(settings.FDW_IMAGE_MODEL, attempt.prompt, urls)
+            try:
+                data, (media_type, ext), cost = image_client.generate(settings.FDW_IMAGE_MODEL, attempt.prompt, urls)
+            except TooLargeForBudget:
+                if not urls:
+                    raise
+                # Smaller references lower OpenRouter's estimate; try once more before asking for credit.
+                urls = reference_urls(settings.FDW_REFERENCE_FALLBACK_EDGE)
+                data, (media_type, ext), cost = image_client.generate(settings.FDW_IMAGE_MODEL, attempt.prompt, urls)
         except BudgetBusy:
             # Not this image's fault and nothing was charged: put it back in the queue untouched.
             attempt.status = ShotAttempt.Status.WAITING
@@ -383,7 +387,7 @@ def make_attempt(attempt: ShotAttempt, client=None, image_client=None) -> ShotAt
             message = str(exc)[:2000]
             attempt.error = message
             attempt.claimed_at = None
-            if _counts_as_attempt(message):
+            if _counts_as_attempt(message) and not isinstance(exc, OutOfCredit):
                 attempt.error_count += 1
             if attempt.error_count >= ShotAttempt.MAX_ERRORS:
                 attempt.status = ShotAttempt.Status.FAILED
