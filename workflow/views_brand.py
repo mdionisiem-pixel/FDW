@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_POST
 
-from . import analyst
+from . import analyst, evidence
 import difflib
 
 from .models import BrandBrief, BrandBriefVersion, BrandInterview, InterviewTurn, compose_prompt_text
@@ -127,6 +127,9 @@ def _interview_context(interview):
         for key, label in BRAND_AREAS.items()
     ]
     covered = sum(1 for c in coverage if c["level"] >= 2)
+    pack = interview.evidence or {}
+    labels = pack.get("items", {})
+    current_sources = [{"id": i, "label": labels[i]} for i in (current.evidence if current else []) if i in labels]
     draft = interview.draft or {}
     brief = BrandBrief.current()
     changes = []
@@ -153,6 +156,9 @@ def _interview_context(interview):
         "removed_count": sum(1 for r in changes if r["kind"] == "removed"),
         "limit": settings.FDW_INTERVIEW_LIMIT_USD,
         "analyst_model": interview.model,
+        "evidence_summary": evidence.summary(pack) if pack else "",
+        "evidence_lines": pack.get("text", "").splitlines() if pack.get("items") else [],
+        "current_sources": current_sources,
     }
 
 

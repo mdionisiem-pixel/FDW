@@ -1017,3 +1017,17 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .new-test > summary { cursor: pointer; font-family: var(--display, inherit); font-size: 1.15rem; list-style-position: inside; }
 .new-test > summary .meta { font-size: 0.85rem; margin-left: 0.4rem; }
 .new-test[open] > summary { margin-bottom: 1rem; }
+
+/* Brand analyst: FDW's own evidence, shown where the analyst uses it. */
+.evidence-fold { margin-bottom: 1rem; }
+.evidence-list { margin: 0; padding-left: 1.1rem; font-size: 0.9rem; color: var(--ink-soft); }
+.evidence-list li + li { margin-top: 0.35rem; }
+.evidence-list li { overflow-wrap: anywhere; }
+.evidence-cite { margin-top: 0.6rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+/* Wraps rather than truncating: a tooltip cannot be read on a phone. */
+.evidence-chip { display: inline-block; max-width: 100%; padding: 0.2rem 0.6rem; border: 1.5px solid var(--line); border-radius: 0.8rem;
+  font-size: 0.82rem; line-height: 1.35; background: var(--chalk); overflow-wrap: anywhere; }
+.evidence-note + .evidence-note { margin-top: 0.4rem; }
+.evidence-kind { font-weight: 700; margin-right: 0.25rem; }
+.evidence-tension .evidence-kind { color: var(--ochre); }
+.evidence-support .evidence-kind { color: var(--moss); }

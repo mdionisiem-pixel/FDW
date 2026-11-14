@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 from django.conf import settings
 from django.db import transaction
 
-from . import bakeoff, prompts, schemas
+from . import evidence, bakeoff, prompts, schemas
 from .llm import parse_json
 from django.db.models import Sum
 from django.utils import timezone
@@ -97,6 +97,12 @@ class OpenRouterChat(bakeoff.OpenRouterImages):
 class DryRunAnalyst:
     """Stand-in answers for FDW_DRY_RUN: walks the areas in order and drafts a sample brief."""
 
+    @staticmethod
+    def _first_ids(prompt: str, count: int) -> list:
+        """The first evidence ids in the prompt's pack, so dry runs show how citations look."""
+        pack = prompt.split("<fdw_evidence>")[1].split("</fdw_evidence>")[0] if "<fdw_evidence>" in prompt else ""
+        return re.findall(r"^\[([SRGT]\d+)\]", pack, re.M)[:count]
+
     def complete(self, prompt: str, max_tokens: int, effort: str) -> Reply:
         if "<open_line>" in prompt:
             subject = prompt.split("<open_line>")[1].split("</open_line>")[0].strip().split("(")[0].split(":")[0].strip()
@@ -132,6 +138,11 @@ class DryRunAnalyst:
                 "brief": "WHO BUYS\nSample customer from the dry run.\n\nRULES\nSample rules kept from the current brief.",
                 "changes": ["Sample change made by the dry run."],
                 "to_confirm": ["Sample gap the founder should settle."],
+                "evidence_notes": ([{"kind": "tension", "evidence": self._first_ids(prompt, 2),
+                                     "note": "Sample: customers ask about pieces the brief does not centre."},
+                                    {"kind": "support", "evidence": self._first_ids(prompt, 1),
+                                     "note": "Sample: the approved research supports the brief's core range."}]
+                                   if self._first_ids(prompt, 1) else []),
             }))
         asked = int(re.search(r"<questions_asked_so_far>(\d+)</questions_asked_so_far>", prompt).group(1))
         keys = list(AREAS)
@@ -145,6 +156,7 @@ class DryRunAnalyst:
             "examples": ["A sample answer", "A different sample answer"],
             "coverage": coverage,
             "ready_to_draft": asked >= len(keys) - 1,
+            "evidence": self._first_ids(prompt, 1) if asked % 3 == 1 else [],
         }))
 
 
@@ -256,13 +268,23 @@ def start(client=None) -> BrandInterview:
     if interview is not None:
         return interview
     interview = BrandInterview.objects.create(
-        model=settings.FDW_MODEL_ANALYST, starting_brief=BrandBrief.current().prompt_text)
+        model=settings.FDW_MODEL_ANALYST, starting_brief=BrandBrief.current().prompt_text,
+        evidence=evidence.build_pack())
     ask_next(interview, client or get_client())
     return interview
 
 
+def pack_for(interview: BrandInterview) -> dict:
+    """The interview's evidence pack. An interview started before packs existed gets one now."""
+    if not interview.evidence:
+        interview.evidence = evidence.build_pack()
+        BrandInterview.objects.filter(pk=interview.pk).update(evidence=interview.evidence)
+    return interview.evidence
+
+
 def ask_next(interview: BrandInterview, client) -> InterviewTurn:
     asked = interview.turns.filter(role=InterviewTurn.Role.ANALYST).count()
+    pack = pack_for(interview)
     coverage = {k: interview.coverage.get(k, 0) for k in AREAS}
     prompt = prompts.render(
         prompts.BRAND_ANALYST,
@@ -270,6 +292,7 @@ def ask_next(interview: BrandInterview, client) -> InterviewTurn:
         area_keys=", ".join(AREAS),
         coverage_template=json.dumps(coverage),
         brief=interview.starting_brief,
+        evidence=pack["text"],
         conversation=conversation_text(interview),
         asked=asked,
     )
@@ -288,6 +311,8 @@ def ask_next(interview: BrandInterview, client) -> InterviewTurn:
             interview=interview, role=InterviewTurn.Role.ANALYST, text=turn_data["question"],
             reflection=turn_data["reflection"], why=turn_data["why"], area=turn_data["area"],
             examples=turn_data["examples"], cost_usd=cost,
+            # Only ids that are really in the pack; a made-up one is dropped, never shown as a source.
+            evidence=evidence.cited(turn_data["evidence"], pack),
         )
 
 
@@ -328,12 +353,13 @@ def draft(interview: BrandInterview, client=None) -> dict:
         raise AnalystError("This interview is closed.")
     if not interview.turns.filter(role=InterviewTurn.Role.FOUNDER).exists():
         raise AnalystError("Answer at least one question first: the draft is built from your answers.")
-    prompt = prompts.render(prompts.BRAND_DRAFT, brief=interview.starting_brief,
+    pack = pack_for(interview)
+    prompt = prompts.render(prompts.BRAND_DRAFT, brief=interview.starting_brief, evidence=pack["text"],
                             conversation=conversation_text(interview))
     result, _ = _call(interview, client or get_client(), "draft", prompt, settings.FDW_ANALYST_DRAFT_TOKENS,
                       settings.FDW_ANALYST_DRAFT_EFFORT, schemas.validate_brand_draft)
     answers = "\n".join(interview.turns.filter(role=InterviewTurn.Role.FOUNDER).values_list("text", flat=True))
-    result = check_draft(result, interview.starting_brief, answers)
+    result = check_draft(result, interview.starting_brief, answers, pack)
     interview.draft = result
     interview.status = BrandInterview.Status.DRAFTED
     interview.error = ""
@@ -501,7 +527,7 @@ def _numbers(text: str) -> set:
     return out
 
 
-def check_draft(draft: dict, starting_brief: str, founder_answers: str) -> dict:
+def check_draft(draft: dict, starting_brief: str, founder_answers: str, pack: dict = None) -> dict:
     """Restore missing protected rules and flag what the founder should look at.
 
     Returns the draft with its brief possibly extended and a ``checks`` list of
@@ -515,7 +541,8 @@ def check_draft(draft: dict, starting_brief: str, founder_answers: str) -> dict:
         for rule in missing:
             checks.append({"kind": "restored", "text": f"Restored a rule the draft left out: {rule} "
                                                        "Delete it below only if you meant to change it."})
-    allowed = _numbers(starting_brief) | _numbers(founder_answers)
+    # Figures from FDW's own evidence are sourced too: the analyst may quote them.
+    allowed = _numbers(starting_brief) | _numbers(founder_answers) | _numbers((pack or {}).get("text", ""))
     draft_text = " ".join([draft["vision"], draft["mission"], brief] +
                           [f"{g['goal']} {g['measure']} {g['by_when']}" for g in draft["goals"]])
     unsourced = sorted(_numbers(draft_text) - allowed)
@@ -527,7 +554,22 @@ def check_draft(draft: dict, starting_brief: str, founder_answers: str) -> dict:
         if words > limit:
             checks.append({"kind": "length", "text": f"The {field} is {words} words; aim for {limit} or fewer, "
                            "so it stays sharp in every prompt."})
-    return dict(draft, brief=brief, checks=checks)
+    notes, invented = [], []
+    for note in draft.get("evidence_notes") or []:
+        invented += [i for i in evidence.unknown(note["evidence"], pack) if i not in invented]
+        ids = evidence.cited(note["evidence"], pack)
+        if ids:  # a note that rests on no real evidence is not shown as evidence
+            notes.append(dict(note, evidence=ids,
+                              sources=[{"id": i, "label": (pack or {}).get("items", {})[i]} for i in ids]))
+    if invented:
+        checks.append({"kind": "evidence", "text": "The analyst cited evidence that FDW does not hold: "
+                       + ", ".join(invented) + ". Those references were removed; read the notes that remain with care."})
+    leaked = sorted(set(evidence.ID.findall(" ".join([draft["vision"], draft["mission"], brief])))
+                    & evidence.known_ids(pack))
+    if leaked:
+        checks.append({"kind": "evidence", "text": "The draft put evidence ids (" + ", ".join(leaked) + ") into the "
+                       "vision, mission or brief. They mean nothing to the design steps; remove them before approving."})
+    return dict(draft, brief=brief, checks=checks, evidence_notes=notes)
 
 
 
@@ -595,7 +637,8 @@ def suggest_options(line: str, client=None) -> OpenPointOptions:
     if _norm(line) in {_norm(r) for r in protected_rules(brief.text)}:
         raise AnalystError("Hard rules protect buyers and are not reworked from options. Change one under Edit by hand "
                            "if you really mean to.")
-    prompt = prompts.render(prompts.BRAND_OPTIONS, line=line, brief=brief.prompt_text)
+    prompt = prompts.render(prompts.BRAND_OPTIONS, line=line, brief=brief.prompt_text,
+                            evidence=evidence.build_pack()["text"])
     result, cost = _call(None, client or get_client(), "options", prompt, settings.FDW_ANALYST_TURN_TOKENS,
                          settings.FDW_ANALYST_TURN_EFFORT, schemas.validate_open_point_options)
     OpenPointOptions.objects.filter(line=line).delete()

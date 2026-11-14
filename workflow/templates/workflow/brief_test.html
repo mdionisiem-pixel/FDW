@@ -105,9 +105,13 @@
         </form>
       {% endif %}
 
-      <form method="post" action="{% url 'bakeoff_brief_test_discard' test.pk %}" class="bt-discard">
-        {% csrf_token %}<button class="btn btn-quiet" type="submit">Discard this test and its copies</button>
-      </form>
+      {% if test.status != "running" or can_finish %}
+        <form method="post" action="{% url 'bakeoff_brief_test_discard' test.pk %}" class="bt-discard">
+          {% csrf_token %}
+          {% if test.status == "judged" %}<label class="check"><input type="checkbox" name="confirm" value="1" required> Delete this judged test and your verdict for good.</label>{% endif %}
+          <button class="btn btn-quiet" type="submit">Discard this test and its copies</button>
+        </form>
+      {% endif %}
     </div>
   {% endif %}
 

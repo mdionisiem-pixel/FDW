@@ -12,6 +12,14 @@
     </ol>
   </div>
 
+  {% if evidence_lines %}
+    <details class="fold evidence-fold">
+      <summary>What the analyst read from FDW: {{ evidence_summary }}</summary>
+      <p class="meta">Taken when the interview started. The analyst asks about what this shows and cites it; your answers still decide the brief.</p>
+      <ul class="evidence-list">{% for line in evidence_lines %}<li>{{ line }}</li>{% endfor %}</ul>
+    </details>
+  {% endif %}
+
   {% if interview.status == "drafted" %}
     {% include "workflow/includes/brand_draft.html" %}
   {% else %}
@@ -40,6 +48,9 @@
           {% if current.reflection %}<p class="turn-reflection">{{ current.reflection }}</p>{% endif %}
           <h2 class="question-text">{{ current.text }}</h2>
           {% if current.why %}<p class="meta">Why it matters: {{ current.why }}</p>{% endif %}
+          {% if current_sources %}
+            <p class="evidence-cite"><span class="meta">Based on your data:</span>{% for e in current_sources %} <span class="evidence-chip" title="{{ e.label }}">{{ e.id }} · {{ e.label }}</span>{% endfor %}</p>
+          {% endif %}
         {% else %}
           <p class="meta question-area">Interview complete</p>
           {% if current.reflection %}<p class="turn-reflection">{{ current.reflection }}</p>{% endif %}

@@ -84,6 +84,13 @@ def judge(request, pk):
 @require_POST
 def discard(request, pk):
     test = get_object_or_404(BriefTest, pk=pk)
+    if test.status == BriefTest.Status.RUNNING and not brief_test.is_stale(test):
+        messages.error(request, "This test is still running. Discard it once it has finished or stopped.")
+        return redirect("bakeoff_brief_test_detail", pk=test.pk)
+    if test.status == BriefTest.Status.JUDGED and request.POST.get("confirm") != "1":
+        # A judged test holds your verdict; losing it by a stray click cannot be undone.
+        messages.error(request, "Tick the box to confirm you want to delete this judged test and its result.")
+        return redirect("bakeoff_brief_test_detail", pk=test.pk)
     for cycle in (test.cycle_a, test.cycle_b):
         if cycle is not None and cycle.is_test:
             cycle.delete()  # the model calls go with it; spend stays in the totals already shown

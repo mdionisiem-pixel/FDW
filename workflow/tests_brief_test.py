@@ -166,7 +166,10 @@ class BriefTestPageTests(TestCase):
         # After the reveal, a new paid test sits folded away below the result, not above it.
         self.assertIn('<details class="stage new-test">', page)
         self.assertLess(page.index('id="result"'), page.index("new-test"))
+        # A judged test holds the verdict: discarding it needs the box ticked.
         self.client.post(reverse("bakeoff_brief_test_discard", args=[test.pk]))
+        self.assertTrue(BriefTest.objects.exists())
+        self.client.post(reverse("bakeoff_brief_test_discard", args=[test.pk]), {"confirm": "1"})
         self.assertFalse(BriefTest.objects.exists())
         self.assertFalse(Cycle.objects.filter(is_test=True).exists())
 
@@ -427,6 +430,17 @@ class RunningStateTests(TestCase):
         page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk]))
         self.assertContains(page, "Running since")
         self.assertNotContains(page, "Finish the test")
+
+    def test_a_running_test_cannot_be_discarded(self):
+        from django.utils import timezone
+        self.client.force_login(get_user_model().objects.create_user("owner2", password="pw"))
+        test = self.stopped_test()
+        BriefTest.objects.filter(pk=test.pk).update(status=BriefTest.Status.RUNNING, started_at=timezone.now())
+        page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk]))
+        self.assertNotContains(page, "Discard this test")
+        self.client.post(reverse("bakeoff_brief_test_discard", args=[test.pk]))
+        self.assertTrue(BriefTest.objects.filter(pk=test.pk).exists())
+        self.assertTrue(Cycle.objects.filter(is_test=True).exists())
 
     def test_a_test_that_never_started_says_so(self):
         self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
