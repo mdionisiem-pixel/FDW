@@ -508,7 +508,7 @@ def _image_review(prompt: str) -> str:
         "checklist_results": [
             {"fact": "Sample fact: overall shape", "observed": "Sample observation", "result": "match"},
             {"fact": "Sample fact: stitch scale", "observed": "Sample observation",
-             "result": "mismatch" if failing else "match"},
+             "result": "mismatch" if failing else "match", "severity": "critical"},
         ],
         "realism_issues": [],
         "verdict": "fail" if failing else "pass",

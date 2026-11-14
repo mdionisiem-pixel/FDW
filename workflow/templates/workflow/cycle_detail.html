@@ -789,22 +789,23 @@
             <form method="post" action="{% url 'decide_visuals' cycle.pk pv.visuals.pk %}" class="gate">
               {% csrf_token %}
               <h3>Gate 4: {{ pv.piece.name }}</h3>
-              {% if pv.a_stuck %}
-                <p>The front packshot did not pass review in {{ max_attempts }} attempts, so the other four shots were not drawn from it. Keep its best attempt and draw the rest from it, request changes for a new round, or reject the piece.</p>
+              {% if pv.front_check %}
+                <p>{% if pv.a_stuck %}The front packshot did not pass review. It is shown above with the reviewer's notes.{% else %}The front packshot passed review.{% endif %} The other four shots are drawn from it, so check it now: approve it and make the rest, approve the piece with the front shot only, request changes for a new round, or reject the piece.</p>
               {% else %}
                 <p>{{ pv.passed }} of 5 shots passed review. Every image is labelled as a concept render wherever it is shown.</p>
                 {% if pv.below_standard %}
                   <fieldset class="decide"><legend>Shots that could not meet the standard</legend>
-                    <p class="meta">Ticked shots go forward with the piece; unticked ones are left out.</p>
-                    {% for s in pv.below_standard %}<label class="pick"><input type="checkbox" name="keep" value="{{ s.code }}"> <span>Keep shot {{ s.code }}, {{ s.name|lower }}</span></label>{% endfor %}
+                    <p class="meta">Ticked shots go forward with the piece; untick any you want left out.</p>
+                    {% for s in pv.below_standard %}<label class="pick"><input type="checkbox" name="keep" value="{{ s.code }}" checked> <span>Keep shot {{ s.code }}, {{ s.name|lower }}</span></label>{% endfor %}
                   </fieldset>
                 {% endif %}
               {% endif %}
               <label for="notes-{{ pv.visuals.pk }}">Notes</label>
               <textarea id="notes-{{ pv.visuals.pk }}" name="notes" rows="2" placeholder="Needed to request changes: what should be different, for example the hem colour or the motif size."></textarea>
               <div class="gate-actions">
-                {% if pv.a_stuck %}
-                  <button class="btn btn-primary" type="submit" name="decision" value="continue">Keep best packshot and continue</button>
+                {% if pv.front_check %}
+                  <button class="btn btn-primary" type="submit" name="decision" value="continue">Approve front shot and make the rest</button>
+                  <button class="btn" type="submit" name="decision" value="approve">Approve with the front shot only</button>
                 {% else %}
                   <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve piece</button>
                 {% endif %}

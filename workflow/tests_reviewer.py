@@ -43,7 +43,7 @@ class VerdictClient:
         verdict = self.verdicts.get(code, "pass")
         return LLMResult(json.dumps({
             "checklist_results": [{"fact": "Deep cherry red", "observed": "red",
-                                   "result": "match" if verdict == "pass" else "mismatch"}],
+                                   "result": "match" if verdict == "pass" else "mismatch", "severity": "critical"}],
             "realism_issues": [], "verdict": verdict,
             "correction_note": "" if verdict == "pass" else "The red must be deeper.",
         }), 3000, 900)
@@ -129,7 +129,7 @@ class ReviewerCheckTests(TestCase):
     def test_uses_the_same_prompt_as_stage_4(self):
         client = VerdictClient({})
         self.run_check(client)
-        self.assertTrue(all("Colour, strictly." in p for p in client.prompts))
+        self.assertTrue(all("Colour. In testing" in p for p in client.prompts))
 
     def test_cost_counts_toward_the_shared_tools_limit(self):
         before = bakeoff.total_spend()

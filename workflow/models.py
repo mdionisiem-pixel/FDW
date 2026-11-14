@@ -621,6 +621,8 @@ class PieceVisuals(models.Model):
     accepted_changes = models.JSONField(default=list, blank=True)
     waitlist_only = models.BooleanField(default=False)
     founder_notes = models.TextField(blank=True)
+    # The founder has approved shot A, so B to E may be made from it (FDW_FRONT_SHOT_GATE).
+    front_approved = models.BooleanField(default=False)
     error = models.TextField(blank=True)
     # Set while a worker is writing the prompts, so two workers never write them twice.
     claimed_at = models.DateTimeField(null=True, blank=True)
@@ -675,6 +677,9 @@ class ShotAttempt(models.Model):
     claimed_at = models.DateTimeField(null=True, blank=True)
     # The founder kept this image at gate 4 although it did not pass review.
     accepted = models.BooleanField(default=False)
+    # The founder's own call on this image, for checking the reviewer against it.
+    founder_verdict = models.CharField(
+        max_length=6, blank=True, choices=[("accept", "Would accept"), ("reject", "Would reject")])
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -695,6 +700,20 @@ class ShotAttempt(models.Model):
     def mismatches(self) -> int:
         results = (self.review or {}).get("checklist_results") or []
         return sum(1 for r in results if r.get("result") == "mismatch")
+
+    @property
+    def problem_score(self):
+        """How far the image is from passing: a critical problem counts three, a minor one counts one.
+
+        Reviews from before problems were graded count every mismatch as critical.
+        None when the attempt was never reviewed.
+        """
+        review = self.review or {}
+        if not review:
+            return None
+        critical = review.get("critical_count", self.mismatches)
+        minor = review.get("minor_count", 0)
+        return critical * 3 + minor
 
 
 # --- Reviewer check: does the stage 4 reviewer judge like the founder? -----------
@@ -725,7 +744,11 @@ class ReviewerResult(models.Model):
         FAILED = "failed", "Failed"
 
     run = models.ForeignKey(ReviewerRun, on_delete=models.CASCADE, related_name="results")
-    image = models.ForeignKey(BakeoffImage, on_delete=models.CASCADE, related_name="reviewer_results")
+    # One of these two is set: an image from the image test, or one from stage 4.
+    image = models.ForeignKey(BakeoffImage, on_delete=models.CASCADE, related_name="reviewer_results",
+                              null=True, blank=True)
+    attempt = models.ForeignKey(ShotAttempt, on_delete=models.CASCADE, related_name="reviewer_results",
+                                null=True, blank=True)
     # The founder's call at the time of the run: would they accept this image?
     founder_accepts = models.BooleanField()
     status = models.CharField(max_length=8, choices=Status.choices, default=Status.WAITING)
@@ -736,10 +759,25 @@ class ReviewerResult(models.Model):
     claimed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ["image__piece_id", "image__shot", "image__code"]
+        ordering = ["id"]
         constraints = [
             models.UniqueConstraint(fields=["run", "image"], name="one_result_per_image_per_run"),
+            models.UniqueConstraint(fields=["run", "attempt"], name="one_result_per_attempt_per_run"),
         ]
+
+    @property
+    def label(self) -> str:
+        if self.attempt_id:
+            a = self.attempt
+            return f"{a.visuals.piece.name}, shot {a.shot} ({a.get_shot_display().lower()}), attempt {a.attempt}"
+        return f"{self.image.piece.name}, {self.image.get_shot_display().lower()}"
+
+    @property
+    def scores_text(self) -> str:
+        if self.attempt_id:
+            return "marked " + ("accept" if self.founder_accepts else "reject")
+        i = self.image
+        return f"scores {i.matches_piece}, {i.material_realism}, {i.colour_accuracy}, {i.photo_realism}"
 
     @property
     def reviewer_accepts(self):

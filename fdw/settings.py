@@ -258,6 +258,12 @@ FDW_VISUALS_LIMIT_USD = Decimal(os.environ.get("FDW_VISUALS_LIMIT_USD", "15"))
 FDW_IMAGE_COST_ESTIMATE_USD = Decimal(os.environ.get("FDW_IMAGE_COST_ESTIMATE_USD", "0.14"))
 # Set aside before each Claude call in stage 4 (prompt writing or one image review).
 FDW_VISUAL_CALL_ESTIMATE_USD = Decimal(os.environ.get("FDW_VISUAL_CALL_ESTIMATE_USD", "0.08"))
+# An image passes review with no critical problem and at most this many minor
+# ones (a slightly different shade, a size or placement a little off).
+FDW_MAX_MINOR_MISMATCHES = int(os.environ.get("FDW_MAX_MINOR_MISMATCHES", "2"))
+# Pause each piece after its front shot, so the founder approves it before the
+# other four shots are made from it.
+FDW_FRONT_SHOT_GATE = os.environ.get("FDW_FRONT_SHOT_GATE", "1") not in ("0", "false", "False", "")
 # Attempts per shot before it goes to the founder marked "could not meet standard".
 FDW_MAX_SHOT_ATTEMPTS = int(os.environ.get("FDW_MAX_SHOT_ATTEMPTS", "3"))
 # How many images the page makes at the same time. Pieces do not depend on
