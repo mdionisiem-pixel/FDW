@@ -12,7 +12,8 @@ TEMPLATES = Path(__file__).parent / "templates" / "workflow"
 # Forms whose submit waits for a model or an outside service: they need data-working.
 FORM_ROUTES = ("run_stage1", "run_stage2", "run_stage3", "bakeoff_describe", "bakeoff_check_models",
                "brand_interview_start", "brand_interview_retry", "brand_interview_draft",
-               "brand_suggest_options", "bakeoff_brief_test_start")
+               "brand_suggest_options", "bakeoff_brief_test_start",
+               "bakeoff_brief_test_finish")
 # Panels the page drives one request at a time: they need an in-panel loader.
 LOOP_ROUTES = ("visuals_next", "bakeoff_make_next", "bakeoff_reviewer_next")
 

@@ -188,6 +188,21 @@ def check_spend(cycle, step: str = "") -> None:
         )
 
 
+def _earlier_answer(cycle, step: str, prompt: str, model: str):
+    """In a brief test copy only, an earlier successful answer to exactly this prompt.
+
+    A brief test that stopped part-way (for example when the API credit ran
+    out) can then be finished without paying again for the work already done:
+    each step's prompt is built from the answers before it, so the same
+    answers give the same prompts up to the point where the run stopped. Real
+    cycles never reuse answers, since running a stage again should give fresh
+    work."""
+    if not getattr(cycle, "is_test", False):
+        return None
+    return (ModelCall.objects.filter(cycle=cycle, step=step, model=model, prompt=prompt, ok=True, reused=False)
+            .exclude(response="").order_by("-id").first())
+
+
 def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, client,
                web_search_max: int = 0, effort: str = "", images=None) -> LLMResult:
     """Make one model call for a cycle, record it, and return the full result.
@@ -197,6 +212,15 @@ def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, clien
     check_spend(cycle, step)
     cost_of(model, 0, 0)  # raises a clear error for an unpriced model before any money is spent
     is_dry = getattr(client, "dry_run", False)
+    earlier = _earlier_answer(cycle, step, prompt, model)
+    if earlier is not None:
+        ModelCall.objects.create(
+            cycle=cycle, step=step, model=model, prompt=prompt, response=earlier.response,
+            input_tokens=earlier.input_tokens, output_tokens=earlier.output_tokens, cost_usd=Decimal("0"),
+            dry_run=earlier.dry_run, reused=True,
+        )
+        return LLMResult(text=earlier.response, input_tokens=earlier.input_tokens,
+                         output_tokens=earlier.output_tokens, web_searches=earlier.web_searches)
     try:
         options = {}
         if web_search_max > 0:

@@ -238,9 +238,10 @@ FDW_ANALYST_DRAFT_EFFORT = os.environ.get("FDW_ANALYST_DRAFT_EFFORT", "medium")
 # them (OpenRouter's data_collection "deny" and zero data retention). Set to 0
 # only to accept providers that may keep the answers.
 FDW_ANALYST_PRIVATE = os.environ.get("FDW_ANALYST_PRIVATE", "1").strip().lower() not in {"0", "false", "no", "off"}
-# Hard stop for one brief test (stage 2 run twice), in US dollars. Stage 2 cost
-# about $2.60 per run on the winter 2026 cycle with Sonnet.
-FDW_BRIEF_TEST_LIMIT_USD = Decimal(os.environ.get("FDW_BRIEF_TEST_LIMIT_USD", "8"))
+# Hard stop for one brief test (stage 2 run twice), in US dollars; each run may
+# use half. Stage 2 cost $2.20 to $2.75 per run in the first test, with
+# revisions writing long specifications, so each half leaves room for that.
+FDW_BRIEF_TEST_LIMIT_USD = Decimal(os.environ.get("FDW_BRIEF_TEST_LIMIT_USD", "12"))
 # Hard stop for option suggestions on open points in the brief, per day, in US dollars.
 FDW_OPTIONS_DAILY_LIMIT_USD = Decimal(os.environ.get("FDW_OPTIONS_DAILY_LIMIT_USD", "1"))
 # Hard stop per interview, in US dollars. A full interview is expected to cost

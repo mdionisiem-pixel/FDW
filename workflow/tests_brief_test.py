@@ -205,3 +205,133 @@ class EstimateTests(TestCase):
         cycle = Cycle.objects.create(name="Dry")
         ModelCall.objects.create(cycle=cycle, step="plan_concepts", model="m", prompt="p", cost_usd=Decimal("0"))
         self.assertEqual(brief_test.run_estimate(), brief_test.DEFAULT_RUN_ESTIMATE)
+
+
+class OutOfCredit(DryRunClient):
+    """Dry-run answers until the credit runs out after a set number of calls, like the first live test."""
+
+    def __init__(self, calls_allowed):
+        self.calls_allowed = calls_allowed
+        self.calls = []
+
+    def complete(self, step, prompt, *args, **kwargs):
+        from .llm import StageError
+        if len(self.calls) >= self.calls_allowed:
+            raise StageError("Your credit balance is too low to access the Anthropic API.")
+        self.calls.append(step)
+        return super().complete(step, prompt, *args, **kwargs)
+
+
+@override_settings(FDW_DRY_RUN=True, FDW_BRIEF_TEST_LIMIT_USD=Decimal("12"))
+class FinishTests(TestCase):
+    def setUp(self):
+        self.cycle = approved_cycle()
+        self.version = earlier_version()
+
+    def test_a_test_stopped_by_credit_is_finished_reusing_every_paid_answer(self):
+        test = brief_test.create(self.cycle, self.version)
+        brief_test.run(test, OutOfCredit(calls_allowed=9))
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.FAILED)
+        paid_before = ModelCall.objects.filter(cycle__is_test=True, ok=True, reused=False).count()
+        self.assertEqual(paid_before, 9)
+        # Run A finished within the nine calls; run B stopped part-way.
+        unfinished = [c for c in (test.cycle_a, test.cycle_b) if not c.concepts.exists()]
+        self.assertEqual(len(unfinished), 1)
+        paid_in_unfinished = ModelCall.objects.filter(cycle=unfinished[0], ok=True).count()
+        self.assertGreater(paid_in_unfinished, 0)
+        fresh = OutOfCredit(calls_allowed=100)
+        brief_test.finish(test, fresh)
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.DONE, test.error)
+        self.assertEqual(test.cycle_a.concepts.count(), 3)
+        self.assertEqual(test.cycle_b.concepts.count(), 3)
+        reused = ModelCall.objects.filter(cycle__is_test=True, reused=True)
+        self.assertEqual(reused.count(), paid_in_unfinished)  # every answer already paid for came back free
+        self.assertFalse(reused.exclude(cost_usd=0).exists())
+        total_calls = paid_before + len(fresh.calls)
+        full = OutOfCredit(calls_allowed=100)
+        other = brief_test.create(self.cycle, self.version)
+        brief_test.run(other, full)
+        self.assertEqual(total_calls, len(full.calls))  # nothing was paid for twice
+
+    def test_a_finished_run_is_left_alone(self):
+        test = brief_test.create(self.cycle, self.version)
+
+        class FailsOnlyA(DryRunClient):
+            def complete(self, step, prompt, *args, **kwargs):
+                from .llm import StageError
+                if step == "review_concept" and "VISION-B" not in prompt:
+                    raise StageError("credit too low")
+                return super().complete(step, prompt, *args, **kwargs)
+
+        brief_test.run(test, FailsOnlyA())
+        b_calls = ModelCall.objects.filter(cycle=test.cycle_b).count()
+        brief_test.finish(test, DryRunClient())
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.DONE)
+        self.assertEqual(ModelCall.objects.filter(cycle=test.cycle_b).count(), b_calls)
+
+    def test_only_a_stopped_test_can_be_finished(self):
+        test = brief_test.create(self.cycle, self.version)
+        brief_test.run(test, DryRunClient())
+        with self.assertRaisesMessage(brief_test.BriefTestError, "stopped part-way"):
+            brief_test.finish(test, DryRunClient())
+
+    def test_real_cycles_never_reuse_answers(self):
+        from . import stages
+        stages.run_stage2(self.cycle, client=DryRunClient())
+        cycle = approved_cycle()
+        ModelCall.objects.create(cycle=cycle, step="plan_concepts", model="m", prompt="p", response="x")
+        from .llm import _earlier_answer
+        self.assertIsNone(_earlier_answer(cycle, "plan_concepts", "p", "m"))
+        self.assertFalse(ModelCall.objects.filter(reused=True).exists())
+
+
+@override_settings(FDW_DRY_RUN=True)
+class FinishPageTests(TestCase):
+    def test_the_page_offers_to_finish_a_stopped_test(self):
+        self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
+        cycle = approved_cycle()
+        test = brief_test.create(cycle, earlier_version())
+        brief_test.run(test, OutOfCredit(calls_allowed=5))
+        page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk]))
+        self.assertContains(page, "Finish the test")
+        self.assertNotContains(page, "Run the test")
+        with override_settings(FDW_DRY_RUN=True):
+            self.client.post(reverse("bakeoff_brief_test_finish", args=[test.pk]))
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.DONE)
+
+
+@override_settings(FDW_DRY_RUN=True, FDW_PARALLEL_CALLS=3, FDW_BRIEF_TEST_LIMIT_USD=Decimal("12"))
+class ParallelFinishTests(TransactionTestCase):
+    """Both runs stopped part-way while running at once, as in the first live test."""
+
+    def test_both_runs_are_finished_without_paying_twice(self):
+        cycle = approved_cycle()
+        test = brief_test.create(cycle, earlier_version())
+
+        class StopsEachRunMidway(DryRunClient):
+            """Each run stops at its first review, after its plan and three designs."""
+
+            def complete(self, step, prompt, *args, **kwargs):
+                from .llm import StageError
+                if step == "review_concept":
+                    raise StageError("Your credit balance is too low to access the Anthropic API.")
+                return super().complete(step, prompt, *args, **kwargs)
+
+        brief_test.run(test, StopsEachRunMidway())
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.FAILED)
+        self.assertIn("Run A", test.error)
+        self.assertIn("Run B", test.error)
+        paid = ModelCall.objects.filter(cycle__is_test=True, ok=True, reused=False).count()
+        self.assertEqual(paid, 8)  # a plan and three designs in each run
+
+        brief_test.finish(test, DryRunClient())
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.DONE, test.error)
+        self.assertEqual(ModelCall.objects.filter(cycle__is_test=True, reused=True).count(), 8)
+        self.assertEqual(test.cycle_a.concepts.count(), 3)
+        self.assertEqual(test.cycle_b.concepts.count(), 3)

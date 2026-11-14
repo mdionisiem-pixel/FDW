@@ -10,7 +10,7 @@
     </div>
   </div>
 
-  {% if not test or test.status == "judged" or test.status == "failed" %}
+  {% if not test or test.status == "judged" %}
     <div class="stage">
       <h2>Run a test</h2>
       {% if cycles and versions %}
@@ -36,7 +36,13 @@
       <h2>Test of {{ test.created_at|date:"j M Y, H:i" }} <span class="meta">on {{ test.source_cycle.name }}</span></h2>
 
       {% if test.status == "failed" %}
-        <aside class="callout callout-stack"><p><strong>A run did not finish.</strong> {{ test.error }}</p></aside>
+        <aside class="callout callout-stack">
+          <p><strong>A run did not finish.</strong> {{ test.error|truncatechars:400 }}</p>
+          <p>Fix the cause, then finish the test. Every step that already succeeded is reused at no cost, so you pay only for what never finished. So far this test has cost ${{ test.cost_usd|floatformat:2 }}.</p>
+          <form method="post" action="{% url 'bakeoff_brief_test_finish' test.pk %}" data-working="Finishing the test, reusing the work already done" data-loader="machine" data-quips="design">
+            {% csrf_token %}<button class="btn btn-primary" type="submit">Finish the test</button>
+          </form>
+        </aside>
       {% endif %}
 
       {% if test.status == "done" %}
