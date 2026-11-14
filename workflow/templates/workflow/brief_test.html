@@ -1,0 +1,115 @@
+{% extends "workflow/base.html" %}
+{% block title %}Brief test | Malina studio{% endblock %}
+{% block content %}
+<section class="page">
+  {% include "workflow/includes/tools_tabs.html" %}
+  <div class="page-head">
+    <div>
+      <h1>Brief test</h1>
+      <p class="lede">Does the brand brief make the designs better? Stage 2 runs twice on hidden copies of one of your cycles: once with an earlier brand brief, once with the current one. Everything else is the same. You judge the two sets blind; only then does the page say which brief made which.</p>
+    </div>
+  </div>
+
+  {% if not test or test.status == "judged" or test.status == "failed" %}
+    <div class="stage">
+      <h2>Run a test</h2>
+      {% if cycles and versions %}
+        <form method="post" action="{% url 'bakeoff_brief_test_start' %}" class="brief-test-form" data-working="Designing two sets of collections, one with each brand brief" data-loader="machine" data-quips="design">
+          {% csrf_token %}
+          <label for="bt-cycle">Cycle to copy (its approved research brief is used for both runs)</label>
+          <select id="bt-cycle" name="cycle">{% for c in cycles %}<option value="{{ c.pk }}">{{ c.name }}</option>{% endfor %}</select>
+          <label for="bt-version">Earlier brand brief to compare with the current one</label>
+          <select id="bt-version" name="version">
+            {% for v in versions %}<option value="{{ v.pk }}"{% if v == default_version %} selected{% endif %}>{{ v.created_at|date:"j M Y, H:i" }} · {{ v.get_source_display }}{% if v.note %} · {{ v.note|truncatechars:60 }}{% endif %}</option>{% endfor %}
+          </select>
+          <button class="btn btn-primary" type="submit">Run the test</button>
+          <p class="meta">About ${{ estimate|floatformat:2 }} for both runs, from what stage 2 has cost on your cycles; stops at ${{ limit|floatformat:2 }} (FDW_BRIEF_TEST_LIMIT_USD). It takes as long as one stage 2 run, since both run at once. Your real cycles are not touched.{% if dry_run %} Dry run: sample designs, no cost.{% endif %}</p>
+        </form>
+      {% else %}
+        <p>You need a cycle with an approved research brief and at least one earlier version of the brand brief.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if test %}
+    <div class="stage" id="result">
+      <h2>Test of {{ test.created_at|date:"j M Y, H:i" }} <span class="meta">on {{ test.source_cycle.name }}</span></h2>
+
+      {% if test.status == "failed" %}
+        <aside class="callout callout-stack"><p><strong>A run did not finish.</strong> {{ test.error }}</p></aside>
+      {% endif %}
+
+      {% if test.status == "done" %}
+        <p class="stage-intro">Read both sets, then answer below. Which brief made which is hidden until you have answered, so it cannot sway you.</p>
+      {% endif %}
+
+      {% if test.status == "judged" %}
+        <div class="bt-outcome">
+          <p class="bt-score"><strong>Current brief {{ outcome.score.B }}</strong> · Earlier brief {{ outcome.score.A }} <span class="meta">(questions won)</span></p>
+          <p class="meta">Set 1 was the {% if test.first_is_a %}earlier{% else %}current{% endif %} brief; Set 2 the {% if test.first_is_a %}current{% else %}earlier{% endif %}. Earlier brief: {{ test.label_a }}.</p>
+          <table class="bt-answers">
+            <thead><tr><th>Question</th><th>Your answer</th><th>That is</th></tr></thead>
+            <tbody>{% for r in outcome.rows %}<tr><td>{{ r.question }}</td><td>{{ r.answer }}</td><td>{% if r.winner == "B" %}the current brief{% elif r.winner == "A" %}the earlier brief{% else %}no difference{% endif %}</td></tr>{% endfor %}</tbody>
+          </table>
+          {% if test.notes %}<p><strong>Your notes:</strong> {{ test.notes }}</p>{% endif %}
+        </div>
+      {% endif %}
+
+      {% if sets %}
+        <div class="bt-sets">
+          {% for s in sets %}
+            <section class="bt-set" aria-labelledby="set-{{ s.number }}">
+              <h3 id="set-{{ s.number }}">Set {{ s.number }}{% if test.status == "judged" %} <span class="bt-which bt-which-{{ s.letter }}">{% if s.letter == "B" %}current brief{% else %}earlier brief{% endif %}</span>{% endif %}</h3>
+              {% if test.status == "judged" %}
+                <dl class="bt-checks">
+                  <div><dt>Colours in your palette</dt><dd>{% if s.checks.palette_share is not None %}{{ s.checks.palette_share }}% of {{ s.checks.colours }}{% else %}no palette{% endif %}</dd></div>
+                  <div><dt>Man-made fibres</dt><dd>{% if s.checks.man_made %}{{ s.checks.man_made|length }} piece{{ s.checks.man_made|length|pluralize }}{% else %}none{% endif %}</dd></div>
+                  <div><dt>"Handmade" on a non-Atelier piece</dt><dd>{% if s.checks.handmade_claims %}{{ s.checks.handmade_claims|join:", " }}{% else %}none{% endif %}</dd></div>
+                  <div><dt>Prices</dt><dd>{% if s.checks.price_mean %}€{{ s.checks.price_low|floatformat:0 }}–{{ s.checks.price_high|floatformat:0 }}, mean €{{ s.checks.price_mean }}{% else %}–{% endif %}</dd></div>
+                  <div><dt>Cost of the run</dt><dd>${{ s.cost|floatformat:2 }}</dd></div>
+                </dl>
+                {% if s.checks.man_made %}<p class="meta">Man-made fibres: {{ s.checks.man_made|join:"; " }}</p>{% endif %}
+              {% endif %}
+              {% for c in s.concepts %}
+                {% include "workflow/includes/test_concept.html" with c=c %}
+              {% empty %}
+                <p class="meta">No concepts were made in this run.</p>
+              {% endfor %}
+            </section>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      {% if test.status == "done" %}
+        <form method="post" action="{% url 'bakeoff_brief_test_judge' test.pk %}" class="bt-judge">
+          {% csrf_token %}
+          {% for key, label in questions %}
+            <fieldset class="bt-question">
+              <legend>{{ label }}</legend>
+              {% for value, text in answers.items %}
+                <label class="bt-choice"><input type="radio" name="{{ key }}" value="{{ value }}" required> {{ text }}</label>
+              {% endfor %}
+            </fieldset>
+          {% endfor %}
+          <label for="bt-notes">What made the difference, if anything? (optional)</label>
+          <textarea id="bt-notes" name="notes" rows="3"></textarea>
+          <button class="btn btn-primary" type="submit">Save my answers and reveal</button>
+        </form>
+      {% endif %}
+
+      <form method="post" action="{% url 'bakeoff_brief_test_discard' test.pk %}" class="bt-discard">
+        {% csrf_token %}<button class="btn btn-quiet" type="submit">Discard this test and its copies</button>
+      </form>
+    </div>
+  {% endif %}
+
+  {% if tests|length > 1 %}
+    <div class="stage">
+      <h2>Earlier tests</h2>
+      <ul class="bt-history">
+        {% for t in tests %}<li><a href="{% url 'bakeoff_brief_test_detail' t.pk %}">{{ t.created_at|date:"j M Y, H:i" }}</a> · {{ t.source_cycle.name }} · {{ t.get_status_display }}</li>{% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

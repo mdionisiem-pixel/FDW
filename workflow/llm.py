@@ -169,6 +169,16 @@ def check_spend(cycle, step: str = "") -> None:
                 "no further calls were made. Raise FDW_VISUALS_LIMIT_USD if you want to continue."
             )
         return
+    if cycle.is_test:
+        # A brief test runs stage 2 twice; each copy gets half the test's limit.
+        limit = settings.FDW_BRIEF_TEST_LIMIT_USD / 2
+        spent = cycle.spend_usd
+        if spent >= limit:
+            raise SpendLimitError(
+                f"This brief test has spent ${spent} on one of its two runs, half its ${settings.FDW_BRIEF_TEST_LIMIT_USD} "
+                "limit, so no further calls were made. Raise FDW_BRIEF_TEST_LIMIT_USD if you want to continue."
+            )
+        return
     limit = settings.FDW_CYCLE_LIMIT_USD
     spent = cycle.spend_usd
     if spent >= limit:

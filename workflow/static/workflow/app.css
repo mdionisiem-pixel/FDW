@@ -978,3 +978,37 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .rework-form .meta { margin: 0; }
 .swatch { width: 1.6rem; height: 1.6rem; border-radius: 6px; border: 1px solid rgba(27, 33, 64, 0.18); }
 .option-form textarea { width: 100%; box-sizing: border-box; }
+
+/* Brief test: two sets side by side, judged blind */
+.brief-test-form { display: grid; gap: 0.45rem; max-width: 40rem; }
+.brief-test-form select { max-width: 100%; }
+.brief-test-form .btn { justify-self: start; margin-top: 0.3rem; }
+.bt-sets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0; }
+.bt-set { background: var(--chalk); border-radius: var(--radius); padding: 0.85rem; min-width: 0; }
+.bt-set h3 { margin: 0 0 0.6rem; }
+.bt-which { font-size: 0.8rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 999px; vertical-align: middle; }
+.bt-which-B { background: var(--moss-wash); color: var(--moss); }
+.bt-which-A { background: var(--ochre-wash); color: var(--ochre); }
+.bt-concept { background: var(--paper); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 0.75rem 0.85rem; margin-bottom: 0.6rem; }
+.bt-concept h4 { margin: 0 0 0.3rem; font-size: 1rem; }
+.bt-concept p { margin: 0 0 0.3rem; }
+.bt-theme { font-size: 0.92rem; }
+.bt-pieces { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.45rem; }
+.bt-pieces > li { border-top: 1.5px dashed var(--line); padding-top: 0.4rem; }
+.bt-piece-name { margin: 0; }
+.swatch-sm { width: 1rem; height: 1rem; border-radius: 4px; }
+.bt-checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: 0.4rem; margin: 0 0 0.6rem; background: var(--paper); border-radius: var(--radius); padding: 0.6rem; }
+.bt-checks dt { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); }
+.bt-checks dd { margin: 0; font-weight: 600; font-size: 0.9rem; }
+.bt-judge { display: grid; gap: 0.75rem; max-width: 46rem; border-top: 1.5px solid var(--line); padding-top: 1rem; }
+.bt-question { border: 1.5px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.85rem; display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; }
+.bt-question legend { font-weight: 600; padding: 0 0.3rem; }
+.bt-choice { display: inline-flex; gap: 0.35rem; align-items: center; }
+.bt-judge .btn { justify-self: start; }
+.bt-outcome { background: var(--paper); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 0.85rem 1rem; margin: 0.5rem 0 1rem; }
+.bt-score { font-size: 1.15rem; margin: 0 0 0.3rem; }
+.bt-answers { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
+.bt-answers th, .bt-answers td { text-align: left; padding: 0.35rem 0.5rem; border-top: 1px solid var(--line); }
+.bt-discard { margin-top: 1rem; }
+.bt-history { margin: 0; padding-left: 1.2rem; }
+@media (max-width: 760px) { .bt-sets { grid-template-columns: 1fr; } }

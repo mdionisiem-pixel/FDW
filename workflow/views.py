@@ -206,7 +206,7 @@ def _concept_cards(cycle):
 
 @login_required
 def dashboard(request):
-    cycles = Cycle.objects.all()
+    cycles = Cycle.objects.filter(is_test=False)
     rows = [{"cycle": c, "rail": _stage_rail(c), "spend": _spend(c)} for c in cycles]
     return render(request, "workflow/dashboard.html", {
         "rows": rows,

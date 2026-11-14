@@ -1,0 +1,17 @@
+{% load workflow_extras %}{# One concept from a brief test, compact: enough to judge it without the stage 2 page's controls. #}
+<article class="bt-concept">
+  <h4>{{ c.name }}{% if c.unresolved %} <span class="meta">(reviewer issues left)</span>{% endif %}</h4>
+  {% if c.theme %}<p class="bt-theme">{{ c.theme }}</p>{% endif %}
+  {% if c.signature_detail %}<p class="meta"><strong>Signature:</strong> {{ c.signature_detail }}</p>{% endif %}
+  {% if c.target_customer %}<p class="meta"><strong>For:</strong> {{ c.target_customer }}</p>{% endif %}
+  <ul class="bt-pieces">
+    {% for p in c.pieces %}
+      <li>
+        <p class="bt-piece-name"><strong>{{ p.name }}</strong> <span class="meta">{{ p.category }}{% if p.target_price_eur %} · €{{ p.target_price_eur }}{% endif %}{% if p.production_route %} · {{ p.production_route|route_name }}{% endif %}</span></p>
+        {% if p.colours %}<span class="swatches" aria-hidden="true">{% for col in p.colours %}<span class="swatch swatch-sm" style="background: {{ col.hex }}" title="{{ col.name }} {{ col.hex }}{% if col.where %}, {{ col.where }}{% endif %}"></span>{% endfor %}</span>{% endif %}
+        <p class="meta">{{ p.silhouette }}{% if p.materials %} · {{ p.materials }}{% endif %}</p>
+        {% if p.surface_detail %}<p class="meta">{{ p.surface_detail }}</p>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</article>
