@@ -553,9 +553,18 @@ def review_payload(field_file) -> tuple:
     return ("image/jpeg", base64.b64encode(jpeg).decode("ascii"))
 
 
-def review_prompt(spec, accepted_changes, checklist, shot: str, reference_shots, earlier_notes=()) -> str:
+REVIEW_MODES = {"concept": prompts.REVIEW_MODE_CONCEPT, "real": prompts.REVIEW_MODE_REAL}
+
+
+def review_prompt(spec, accepted_changes, checklist, shot: str, reference_shots, earlier_notes=(),
+                  mode: str = "concept") -> str:
     """The stage 4 reviewer's prompt. The reviewer check on the Tools page uses the same function,
-    so what it measures is exactly what stage 4 runs."""
+    so what it measures is exactly what stage 4 runs.
+
+    mode "concept" is for a piece that does not exist yet (stage 4): the specification's sizes
+    and shades are targets, and acceptable departures are recorded as spec updates.
+    mode "real" is for images of a piece that exists (the image test): any visible
+    difference from the real piece, colour shade included, is critical."""
     if reference_shots:
         names = ", ".join(f"shot {code} ({SHOT_NAMES[code].lower()})" for code in reference_shots)
         count = len(reference_shots)
@@ -572,6 +581,7 @@ def review_prompt(spec, accepted_changes, checklist, shot: str, reference_shots,
     ) if earlier_notes else ""
     return prompts.render(
         prompts.VISUAL_REVIEWER,
+        mode_rules=REVIEW_MODES[mode],
         reference_note=reference_note,
         earlier_corrections=earlier_text,
         realism_standard=prompts.REALISM_STANDARD,
@@ -588,7 +598,8 @@ def reviewer_version() -> str:
     """Changes whenever the reviewer's prompt, realism standard or model changes."""
     import hashlib
 
-    text = prompts.VISUAL_REVIEWER + prompts.REALISM_STANDARD + settings.FDW_MODEL_WRITER
+    text = (prompts.VISUAL_REVIEWER + prompts.REVIEW_MODE_CONCEPT + prompts.REVIEW_MODE_REAL
+            + prompts.REALISM_STANDARD + settings.FDW_MODEL_WRITER)
     return hashlib.sha256(text.encode()).hexdigest()[:10]
 
 
@@ -603,7 +614,7 @@ def review_attempt(attempt: ShotAttempt, client) -> dict:
             shot=attempt.shot, attempt__lt=attempt.attempt, status=ShotAttempt.Status.FAILED
         ).order_by("attempt") if a.correction_note
     ]
-    prompt = review_prompt(visuals.piece.spec, visuals.accepted_changes + visuals.assumptions,
+    prompt = review_prompt(visuals.piece.spec, visuals.accepted_changes + visuals.assumptions + visuals.build_to_image,
                            checklist_for(visuals, attempt.shot), attempt.shot, [r.shot for r in refs], earlier)
     return run_json(
         visuals.cycle, "visual_review", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
@@ -696,6 +707,23 @@ def advance(visuals: PieceVisuals) -> None:
 # --- Gate 4 ----------------------------------------------------------------------------
 
 
+def _build_to_image(visuals: PieceVisuals, attempts) -> None:
+    """Record where the approved images depart from the specification's targets.
+
+    In concept mode the reviewer lists such departures as spec updates instead of
+    failing the image. Once the founder approves the image, the piece is made to
+    match it, so the departures become part of what Malina will deliver."""
+    found = list(visuals.build_to_image)
+    for attempt in attempts:
+        if attempt is None or not attempt.review:
+            continue
+        for update in attempt.review.get("spec_updates", []):
+            line = f"Shot {attempt.shot}: {update}"
+            if line not in found:
+                found.append(line)
+    visuals.build_to_image = found
+
+
 def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user: str = "") -> PieceVisuals:
     """Gate 4 for one piece.
 
@@ -737,10 +765,11 @@ def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user:
                 front.accepted = True
                 front.save(update_fields=["accepted"])
             record = ". ".join(["Approved with the front shot only"] + ([notes] if notes else []))
+            _build_to_image(visuals, [front])
             visuals.front_approved = True
             visuals.status = PieceVisuals.Status.APPROVED
             visuals.decided_at = timezone.now()
-            visuals.save(update_fields=["front_approved", "status", "decided_at"])
+            visuals.save(update_fields=["front_approved", "status", "decided_at", "build_to_image"])
         elif decision == "approve":
             kept, left_out = [], []
             for shot, state in states.items():
@@ -760,9 +789,12 @@ def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user:
             if left_out:
                 parts.append(f"Left out: shot {', '.join(left_out)}")
             record = ". ".join(parts + ([notes] if notes else []))
+            approved = [a for shot, attempts in grouped.items() if shot not in left_out for a in attempts
+                        if a.status == ShotAttempt.Status.PASSED or a.accepted]
+            _build_to_image(visuals, approved)
             visuals.status = PieceVisuals.Status.APPROVED
             visuals.decided_at = timezone.now()
-            visuals.save(update_fields=["status", "decided_at"])
+            visuals.save(update_fields=["status", "decided_at", "build_to_image"])
         elif decision == "reject":
             visuals.status = PieceVisuals.Status.REJECTED
             visuals.decided_at = timezone.now()
@@ -772,6 +804,7 @@ def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user:
             visuals.founder_notes = (history + "\n" if history else "") + f"After round {visuals.round}: {notes}"
             visuals.round += 1
             visuals.front_approved = False
+            visuals.build_to_image = []
             visuals.status = PieceVisuals.Status.WRITING
             visuals.prompts, visuals.checklist, visuals.missing_information = {}, [], []
             visuals.claimed_at = None
@@ -782,9 +815,11 @@ def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user:
             if best.status != ShotAttempt.Status.PASSED:
                 best.accepted = True
                 best.save(update_fields=["accepted"])
+            # Shots B to E are reviewed against shot A as approved, departures included.
+            _build_to_image(visuals, [best])
             visuals.front_approved = True
             visuals.status = PieceVisuals.Status.MAKING
-            visuals.save(update_fields=["front_approved", "status"])
+            visuals.save(update_fields=["front_approved", "status", "build_to_image"])
         Approval.objects.create(
             cycle=cycle, stage=4, item=piece_label[:200], decision=DECISIONS[decision][:20],
             notes=record, decided_by=user,

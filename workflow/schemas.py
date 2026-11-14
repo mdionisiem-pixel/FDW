@@ -700,7 +700,9 @@ def sourcing_code_checks(item, piece, suppliers, eur_rates, min_margin):
 # --- Stage 4: visual prototypes ----------------------------------------------------
 
 SHOT_CODES = ("A", "B", "C", "D", "E")
-CHECK_RESULTS = {"match", "mismatch", "not_visible"}
+# spec_update: in concept mode, the image differs from a target in the specification
+# in a way that is acceptable; if the image is approved, the specification follows it.
+CHECK_RESULTS = {"match", "mismatch", "not_visible", "spec_update"}
 
 
 def _name_pattern(name: str):
@@ -873,7 +875,10 @@ def validate_image_review(data, max_minor=None):
     for r in results:
         fact = r["fact"].strip()
         entry = {"fact": fact, "observed": str(r.get("observed") or "").strip(), "result": r["result"]}
-        if r["result"] == "mismatch":
+        if r["result"] == "spec_update" and fact.lower().startswith("critical:"):
+            # A fact the art director marked critical is never a mere target.
+            entry["result"] = "mismatch"
+        if entry["result"] == "mismatch":
             severity = _severity(r.get("severity"))
             if fact.lower().startswith("critical:"):
                 severity = "critical"
@@ -890,6 +895,8 @@ def validate_image_review(data, max_minor=None):
             issues.append({"issue": text, "severity": severity})
 
     mismatched = [r for r in checklist if r["result"] == "mismatch"]
+    spec_updates = [f"{r['fact']}: the image shows {r['observed'] or 'a different value'}"
+                    for r in checklist if r["result"] == "spec_update"]
     critical = [r for r in mismatched if r["severity"] == "critical"] + [i for i in issues if i["severity"] == "critical"]
     minor = [r for r in mismatched if r["severity"] == "minor"] + [i for i in issues if i["severity"] == "minor"]
     decided = "fail" if critical or len(minor) > max_minor else "pass"
@@ -906,6 +913,7 @@ def validate_image_review(data, max_minor=None):
         # Stored as text, critical first, so they read plainly wherever they are shown.
         "realism_issues": [f"{i['severity'].capitalize()}: {i['issue']}" for i in
                            sorted(issues, key=lambda i: i["severity"] != "critical")],
+        "spec_updates": spec_updates,
         "critical_count": len(critical),
         "minor_count": len(minor),
         "verdict": decided,
