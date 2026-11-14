@@ -264,6 +264,11 @@ FDW_MAX_MINOR_MISMATCHES = int(os.environ.get("FDW_MAX_MINOR_MISMATCHES", "2"))
 # Pause each piece after its front shot, so the founder approves it before the
 # other four shots are made from it.
 FDW_FRONT_SHOT_GATE = os.environ.get("FDW_FRONT_SHOT_GATE", "1") not in ("0", "false", "False", "")
+# Web searches the visual research may make per piece, before its prompts are written.
+FDW_VISUAL_RESEARCH_SEARCHES = int(os.environ.get("FDW_VISUAL_RESEARCH_SEARCHES", "5"))
+# Smallest acceptable long side of a generated image, in pixels. Smaller images
+# are failed in code before review: stitch detail cannot render at 1K.
+FDW_MIN_IMAGE_EDGE = int(os.environ.get("FDW_MIN_IMAGE_EDGE", "2048"))
 # Attempts per shot before it goes to the founder marked "could not meet standard".
 FDW_MAX_SHOT_ATTEMPTS = int(os.environ.get("FDW_MAX_SHOT_ATTEMPTS", "3"))
 # How many images the page makes at the same time. Pieces do not depend on

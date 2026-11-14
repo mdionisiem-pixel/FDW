@@ -106,8 +106,9 @@ def review_next(run: ReviewerRun, client=None):
         attempt = result.attempt
         piece_set = attempt.visuals
         refs = sorted(ShotAttempt.objects.filter(pk__in=attempt.references), key=lambda a: a.shot)
-        prompt = visuals.review_prompt(piece_set.piece.spec, piece_set.accepted_changes, piece_set.checklist,
-                                       attempt.shot, [r.shot for r in refs])
+        prompt = visuals.review_prompt(piece_set.piece.spec, piece_set.accepted_changes + piece_set.assumptions,
+                                       visuals.checklist_for(piece_set, attempt.shot), attempt.shot,
+                                       [r.shot for r in refs])
         sources = [attempt] + refs
     else:
         image = result.image

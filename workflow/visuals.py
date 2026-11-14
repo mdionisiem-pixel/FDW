@@ -35,7 +35,7 @@ from django.utils import timezone
 
 from . import prompts, schemas
 from .bakeoff import BakeoffError, BudgetBusy, OutOfCredit, TooLargeForBudget, get_image_client, reference_url, sniff
-from .llm import SpendLimitError, StageError, get_client, run_json
+from .llm import SpendLimitError, StageError, get_client, parse_json, run_json, run_result
 from .models import (
     SHOTS,
     Approval,
@@ -101,7 +101,8 @@ def start_stage4(cycle: Cycle) -> int:
 
 def unit_estimate(kind: str) -> Decimal:
     if kind == "prompts":
-        return settings.FDW_VISUAL_CALL_ESTIMATE_USD
+        # Research with web searches, the art director, and the acceptance stories.
+        return settings.FDW_VISUAL_CALL_ESTIMATE_USD * 3 + Decimal("0.01") * settings.FDW_VISUAL_RESEARCH_SEARCHES
     return settings.FDW_IMAGE_COST_ESTIMATE_USD + settings.FDW_VISUAL_CALL_ESTIMATE_USD
 
 
@@ -204,7 +205,7 @@ def work_next(cycle: Cycle, client=None, image_client=None) -> dict:
     kind, item = job
     if kind == "prompts":
         write_prompts(item, client)
-        return {"state": "worked", "did": f"Wrote the shot prompts for {item.piece.name}."}
+        return {"state": "worked", "did": f"Researched {item.piece.name} and wrote its shot prompts and acceptance stories."}
     try:
         make_attempt(item, client, image_client)
     except BudgetBusy:
@@ -241,30 +242,114 @@ def _collection_context(piece) -> str:
     return json.dumps(context, ensure_ascii=False, indent=1)
 
 
-def write_prompts(visuals: PieceVisuals, client=None) -> PieceVisuals:
-    cycle = visuals.cycle
+def _research_text(research: dict) -> str:
+    """The research as the art director and acceptance writer read it: general traits, never sources or names."""
+    if not research:
+        return "None."
+    parts = []
+    for label, key in (("How the technique looks in real products", "technique_traits"),
+                       ("How this kind of piece hangs and is constructed", "garment_traits"),
+                       ("Typical wrong renderings to avoid", "must_not_look_like"),
+                       ("How real products in this category are photographed", "photography_notes")):
+        if research.get(key):
+            parts.append(label + ":\n" + _bullets(research[key], ""))
+    names = research.get("names_to_avoid") or []
+    if names:
+        parts.append("names_to_avoid (never use any of these): " + ", ".join(names))
+    return "\n\n".join(parts)
+
+
+def research_piece(visuals: PieceVisuals, client) -> dict:
+    """Search the web for how this technique and kind of piece really look, before any prompt is written."""
     piece = visuals.piece
     prompt = prompts.render(
-        prompts.VISUAL_ART_DIRECTOR,
-        brand_brief=BrandBrief.current().text,
-        realism_standard=prompts.REALISM_STANDARD,
+        prompts.VISUAL_RESEARCH,
         piece_json=json.dumps(piece.spec, ensure_ascii=False, indent=1),
-        accepted_changes=_bullets(visuals.accepted_changes, "None. Make the piece exactly as specified."),
         collection_context=_collection_context(piece),
-        founder_notes=visuals.founder_notes.strip() or "None. This is the first round.",
+    )
+    result = run_result(
+        visuals.cycle, "visual_research", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
+        client, web_search_max=settings.FDW_VISUAL_RESEARCH_SEARCHES,
     )
     try:
-        data = run_json(
-            cycle, "visual_art_direction", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
-            schemas.validate_art_direction, client or get_client(),
+        research = schemas.validate_visual_research(parse_json(result.text))
+    except schemas.SchemaError:
+        # One more try without searching again: the findings are in the answer, only its shape was wrong.
+        research = run_json(
+            visuals.cycle, "visual_research_reformat",
+            prompts.render(prompts.REFORMAT_VISUAL_RESEARCH, previous_answer=result.text),
+            settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_visual_research, client,
+        )
+    # A source counts as checked only when the search tool actually returned it in this run.
+    known = {schemas.normalise_url(url) for url in result.source_urls}
+    for source in research["sources"]:
+        source["verified"] = schemas.normalise_url(source["url"]) in known
+    return research
+
+
+def write_prompts(visuals: PieceVisuals, client=None) -> PieceVisuals:
+    """Prepare one piece for images: visual research, the art director's prompts, then acceptance stories."""
+    cycle = visuals.cycle
+    piece = visuals.piece
+    client = client or get_client()
+    brand_brief = BrandBrief.current().text
+    piece_json = json.dumps(piece.spec, ensure_ascii=False, indent=1)
+    accepted = _bullets(visuals.accepted_changes, "None. Make the piece exactly as specified.")
+    try:
+        research = research_piece(visuals, client)
+        names = research["names_to_avoid"]
+        research_text = _research_text(research)
+        prompt = prompts.render(
+            prompts.VISUAL_ART_DIRECTOR,
+            brand_brief=brand_brief,
+            realism_standard=prompts.REALISM_STANDARD,
+            piece_json=piece_json,
+            accepted_changes=accepted,
+            collection_context=_collection_context(piece),
+            visual_research=research_text,
+            founder_notes=visuals.founder_notes.strip() or "None. This is the first round.",
+        )
+        try:
+            direction = run_json(
+                cycle, "visual_art_direction", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
+                lambda data: schemas.validate_art_direction(data, names), client,
+            )
+        except StageError as exc:
+            if "never names or imitates" not in str(exc):
+                raise
+            # The guard held twice: take the prompts without the names rather than stop the stage.
+            direction = run_json(
+                cycle, "visual_art_direction", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
+                schemas.validate_art_direction, client,
+            )
+            removed = sorted({n for text in direction["prompts"].values() for n in schemas.names_found(text, names)})
+            direction["prompts"] = {k: schemas.strip_names(v, names) for k, v in direction["prompts"].items()}
+            if removed:
+                direction["assumptions"].append("Removed names of other brands from the prompts: " + ", ".join(removed))
+        acceptance = run_json(
+            cycle, "visual_acceptance",
+            prompts.render(
+                prompts.VISUAL_ACCEPTANCE,
+                brand_brief=brand_brief,
+                piece_json=piece_json,
+                accepted_changes=accepted,
+                assumptions=_bullets(direction["assumptions"], "None."),
+                visual_research=research_text,
+            ),
+            settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
+            lambda data: schemas.validate_acceptance(data, names), client,
         )
     except StageError as exc:
         PieceVisuals.objects.filter(pk=visuals.pk).update(claimed_at=None, error=str(exc)[:2000])
         raise
     with transaction.atomic():
-        visuals.prompts = data["prompts"]
-        visuals.checklist = data["reviewer_checklist"]
-        visuals.missing_information = data["missing_information"]
+        visuals.research = research
+        visuals.prompts = direction["prompts"]
+        visuals.assumptions = direction["assumptions"]
+        visuals.stories = acceptance["stories"]
+        visuals.criteria = acceptance["criteria"]
+        visuals.checklist = []
+        visuals.missing_information = []
         visuals.status = PieceVisuals.Status.MAKING
         visuals.claimed_at = None
         visuals.error = ""
@@ -274,6 +359,16 @@ def write_prompts(visuals: PieceVisuals, client=None) -> PieceVisuals:
             defaults={"prompt": visuals.prompts["A"], "model": settings.FDW_IMAGE_MODEL},
         )
     return visuals
+
+
+def checklist_for(visuals: PieceVisuals, shot: str) -> list:
+    """The acceptance criteria this shot can show, as the reviewer reads them."""
+    if visuals.criteria:
+        return [
+            f"{'Critical' if c['severity'] == 'critical' else 'Detail'}: {c['criterion']}"
+            for c in visuals.criteria if shot in c["shots"]
+        ]
+    return list(visuals.checklist)  # pieces prepared before acceptance stories existed
 
 
 # --- Unit 2: make one image, then review it ------------------------------------------
@@ -297,6 +392,13 @@ def _as_jpeg(data: bytes, edge: int, quality: int) -> bytes:
     buffer = io.BytesIO()
     image.save(buffer, "JPEG", quality=quality, optimize=True)
     return buffer.getvalue()
+
+
+def _pixel_size(field_file) -> tuple:
+    from PIL import Image
+
+    with Image.open(io.BytesIO(_read(field_file))) as image:
+        return image.size
 
 
 def _is_raster(field_file) -> bool:
@@ -412,6 +514,20 @@ def make_attempt(attempt: ShotAttempt, client=None, image_client=None) -> ShotAt
         attempt.error = ""
         attempt.save()
 
+    if not sample_images and _is_raster(attempt.file):
+        width, height = _pixel_size(attempt.file)
+        if max(width, height) < settings.FDW_MIN_IMAGE_EDGE:
+            # Too small to show stitches: not worth a review. It counts as an attempt, and the shot is redrawn.
+            attempt.status = ShotAttempt.Status.FAILED
+            attempt.review = None
+            attempt.correction_note = ""
+            attempt.claimed_at = None
+            attempt.error = (f"The image came back at {width}×{height} px, below the {settings.FDW_MIN_IMAGE_EDGE} px "
+                             "the specification requires, so it was not reviewed.")
+            attempt.save()
+            advance(visuals)
+            return attempt
+
     try:
         review = review_attempt(attempt, client or get_client())
     except StageError as exc:
@@ -487,8 +603,8 @@ def review_attempt(attempt: ShotAttempt, client) -> dict:
             shot=attempt.shot, attempt__lt=attempt.attempt, status=ShotAttempt.Status.FAILED
         ).order_by("attempt") if a.correction_note
     ]
-    prompt = review_prompt(visuals.piece.spec, visuals.accepted_changes, visuals.checklist,
-                           attempt.shot, [r.shot for r in refs], earlier)
+    prompt = review_prompt(visuals.piece.spec, visuals.accepted_changes + visuals.assumptions,
+                           checklist_for(visuals, attempt.shot), attempt.shot, [r.shot for r in refs], earlier)
     return run_json(
         visuals.cycle, "visual_review", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
         schemas.validate_image_review, client, images=images,
