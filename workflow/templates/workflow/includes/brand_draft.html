@@ -8,6 +8,19 @@
   </aside>
 {% endif %}
 
+{% if draft.evidence_notes %}
+  <aside class="callout callout-stack evidence-notes" aria-label="What your data says">
+    <p><strong>What FDW's own data says about this draft</strong></p>
+    <ul>
+      {% for n in draft.evidence_notes %}
+        <li class="evidence-note evidence-{{ n.kind }}"><span class="evidence-kind">{% if n.kind == "tension" %}Pulls against{% else %}Supports{% endif %}</span> {{ n.note }}
+          <span class="meta">({% for e in n.sources %}{{ e.id }}: {{ e.label }}{% if not forloop.last %}; {% endif %}{% endfor %})</span></li>
+      {% endfor %}
+    </ul>
+    <p class="meta">Your answers decide the brief. These notes are here so you decide knowing what customers and your past decisions show.</p>
+  </aside>
+{% endif %}
+
 {% if draft.to_confirm %}
   <aside class="callout callout-stack">
     <p><strong>{{ draft.to_confirm|length }} point{{ draft.to_confirm|pluralize }} for you to settle</strong></p>

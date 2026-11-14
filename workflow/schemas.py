@@ -963,6 +963,8 @@ def validate_analyst_turn(data, areas):
         "examples": examples if asking else [],
         "coverage": coverage,
         "ready_to_draft": ready,
+        # Ids from the evidence pack; checked against the pack by the caller.
+        "evidence": _id_list(data.get("evidence")) if asking else [],
     }
 
 
@@ -1004,7 +1006,28 @@ def validate_brand_draft(data):
         "brief": data["brief"].strip(),
         "changes": [str(c).strip() for c in (data.get("changes") or []) if _is_text(c)],
         "to_confirm": to_confirm,
+        "evidence_notes": _evidence_notes(data.get("evidence_notes")),
     }
+
+
+def _id_list(value) -> list:
+    if not isinstance(value, list):
+        return []
+    return [str(v).strip() for v in value if _is_text(v)][:8]
+
+
+def _evidence_notes(value) -> list:
+    """Notes linking the draft to FDW's evidence. Loose on purpose: a malformed
+    note is dropped rather than failing a draft the founder is waiting for."""
+    notes = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict) or not _is_text(item.get("note")):
+            continue
+        kind = str(item.get("kind") or "").strip().lower()
+        notes.append({"kind": "tension" if kind == "tension" else "support",
+                      "note": item["note"].strip(), "evidence": _id_list(item.get("evidence"))})
+    notes.sort(key=lambda n: n["kind"] != "tension")
+    return notes[:8]
 
 
 HEX_COLOUR = re.compile(r"^#[0-9A-Fa-f]{6}$")

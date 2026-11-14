@@ -158,6 +158,10 @@ class BrandInterview(models.Model):
     starting_brief = models.TextField(blank=True)
     # The analyst's latest view of how well each area is covered: {area: 0-3}.
     coverage = models.JSONField(default=dict, blank=True)
+    # What FDW knew when the interview started (evidence.build_pack): customer signals,
+    # approved research briefs, gate decisions. Fixed for the interview, so every
+    # question and the draft read the same evidence and cite the same ids.
+    evidence = models.JSONField(default=dict, blank=True)
     draft = models.JSONField(null=True, blank=True)
     cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     error = models.TextField(blank=True)
@@ -234,6 +238,8 @@ class InterviewTurn(models.Model):
     why = models.TextField(blank=True)
     area = models.CharField(max_length=30, blank=True)
     examples = models.JSONField(default=list, blank=True)
+    # Evidence ids from the interview's pack that this question is based on.
+    evidence = models.JSONField(default=list, blank=True)
     cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
     created_at = models.DateTimeField(auto_now_add=True)
 
