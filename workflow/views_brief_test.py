@@ -37,6 +37,10 @@ def page(request, pk=None):
 @login_required
 @require_POST
 def start(request):
+    if request.POST.get("confirm") != "1":
+        # A new test spends real money, so it needs an explicit tick, never a stray click.
+        messages.error(request, "Tick the box to confirm you want to start a new paid test.")
+        return redirect("bakeoff_brief_test")
     cycle = get_object_or_404(Cycle, pk=request.POST.get("cycle"), is_test=False)
     version = BrandBriefVersion.objects.filter(pk=request.POST.get("version")).first()
     try:

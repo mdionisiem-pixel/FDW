@@ -150,9 +150,9 @@ class BriefTestPageTests(TestCase):
 
     def test_run_judge_reveal_and_discard_through_the_pages(self):
         page = self.client.get(reverse("bakeoff_brief_test"))
-        self.assertContains(page, "Run the test")
+        self.assertContains(page, "Start a new test")
         self.assertContains(page, "Brief test")
-        self.client.post(reverse("bakeoff_brief_test_start"), {"cycle": self.cycle.pk, "version": self.version.pk})
+        self.client.post(reverse("bakeoff_brief_test_start"), {"cycle": self.cycle.pk, "version": self.version.pk, "confirm": "1"})
         test = BriefTest.objects.get()
         page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk])).content.decode()
         self.assertIn("Set 1", page)
@@ -163,9 +163,19 @@ class BriefTestPageTests(TestCase):
         page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk])).content.decode()
         self.assertIn("current brief</span>", page)
         self.assertIn("Colours in your palette", page)
+        # After the reveal, a new paid test sits folded away below the result, not above it.
+        self.assertIn('<details class="stage new-test">', page)
+        self.assertLess(page.index('id="result"'), page.index("new-test"))
         self.client.post(reverse("bakeoff_brief_test_discard", args=[test.pk]))
         self.assertFalse(BriefTest.objects.exists())
         self.assertFalse(Cycle.objects.filter(is_test=True).exists())
+
+    def test_a_new_test_needs_the_box_ticked(self):
+        response = self.client.post(reverse("bakeoff_brief_test_start"),
+                                    {"cycle": self.cycle.pk, "version": self.version.pk})
+        self.assertFalse(BriefTest.objects.exists())
+        page = self.client.get(response.url)
+        self.assertContains(page, "Tick the box to confirm")
 
     def test_test_copies_never_appear_among_your_cycles(self):
         test = brief_test.create(self.cycle, self.version)
@@ -297,7 +307,7 @@ class FinishPageTests(TestCase):
         brief_test.run(test, OutOfCredit(calls_allowed=5))
         page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk]))
         self.assertContains(page, "Finish the test")
-        self.assertNotContains(page, "Run the test")
+        self.assertNotContains(page, "Start a new test")
         with override_settings(FDW_DRY_RUN=True):
             self.client.post(reverse("bakeoff_brief_test_finish", args=[test.pk]))
         test.refresh_from_db()
