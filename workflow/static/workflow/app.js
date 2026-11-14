@@ -237,4 +237,81 @@
       }).catch(function () { saved.textContent = "Not saved. Check the connection."; });
     });
   });
+
+  // Stage 4: several workers each ask for one unit of work at a time (write a
+  // piece's prompts, or make and review one image). The server claims each
+  // unit before starting it, so workers never repeat each other's work.
+  var visualMake = document.getElementById("visual-make");
+  var visualButton = document.getElementById("visual-button");
+  if (visualMake && visualButton) {
+    var vToken = visualMake.querySelector("input[name=csrfmiddlewaretoken]").value;
+    var vFill = document.getElementById("visual-fill");
+    var vStatus = document.getElementById("visual-status");
+    var vLast = document.getElementById("visual-last");
+    var workers = Math.max(1, parseInt(visualMake.getAttribute("data-workers"), 10) || 1);
+    var running = 0;
+    var stopped = false;
+    var stopMessage = "";
+    var showVisual = function (p) {
+      if (!p) return;
+      vFill.style.width = (p.shots ? Math.round(p.resolved / p.shots * 100) : 0) + "%";
+      vStatus.textContent = p.resolved + " of " + p.shots + " shots finished, " + p.made + " images made, " +
+        p.ready + " piece" + (p.ready === 1 ? "" : "s") + " awaiting your decision. Spent $" + p.spent + " of $" + p.limit + ".";
+    };
+    var workerDone = function (message) {
+      running -= 1;
+      if (message) vLast.textContent = message;
+      if (running > 0) return;
+      if (stopped) {
+        vLast.textContent = stopMessage || "Stopped. Press Continue to carry on.";
+        visualButton.disabled = false;
+        visualButton.textContent = "Continue";
+      } else {
+        vLast.textContent = "All images are made and reviewed. Loading them.";
+        window.location.reload();
+      }
+    };
+    var work = function () {
+      if (stopped) { workerDone(); return; }
+      fetch(visualMake.getAttribute("data-url"), {
+        method: "POST",
+        headers: { "X-CSRFToken": vToken, "X-Requested-With": "fetch" },
+        credentials: "same-origin"
+      }).then(function (response) {
+        return response.json().then(function (body) { return { ok: response.ok, body: body }; });
+      }).then(function (result) {
+        var body = result.body;
+        showVisual(body.progress);
+        if (!result.ok || body.state === "error") {
+          stopped = true;
+          stopMessage = body.error || stopMessage;
+          workerDone();
+          return;
+        }
+        if (body.state === "worked") {
+          vLast.textContent = body.did;
+          work();
+        } else if (body.state === "waiting") {
+          window.setTimeout(work, 4000);
+        } else {
+          workerDone();
+        }
+      }).catch(function () {
+        stopped = true;
+        stopMessage = stopMessage || "The app did not answer. Press Continue to carry on; nothing made so far is lost.";
+        workerDone();
+      });
+    };
+    visualButton.addEventListener("click", function () {
+      visualButton.disabled = true;
+      visualButton.textContent = "Making images";
+      vLast.textContent = "Starting.";
+      stopped = false;
+      stopMessage = "";
+      for (var i = 0; i < workers; i += 1) {
+        running += 1;
+        window.setTimeout(work, i * 700);
+      }
+    });
+  }
 })();

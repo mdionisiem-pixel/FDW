@@ -11,9 +11,13 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from . import charts, stages
+from . import charts, stages, visuals
 from .llm import StageError
-from .models import BrandBrief, Concept, Cycle, DemandBrief, RawItem, SourcingCheck, SourcingResult, Supplier
+from .models import (
+    BrandBrief, Concept, Cycle, DemandBrief, PieceVisuals, RawItem, ShotAttempt, SourcingCheck, SourcingResult,
+    Supplier,
+)
+from .views_bakeoff import _file_response
 from .schemas import REVIEW_CRITERIA
 
 STAGES = [
@@ -25,7 +29,7 @@ STAGES = [
     (6, "Price test", "Waitlist with prices, then pre-orders"),
     (7, "Launch kit and learning", "Content, and results for next time"),
 ]
-BUILT_STAGES = 3
+BUILT_STAGES = 4
 
 CRITERION_LABELS = {
     "demand_evidence": "Demand evidence",
@@ -294,9 +298,31 @@ def cycle_detail(request, pk):
         "min_margin_percent": round(settings.FDW_MIN_GROSS_MARGIN * 100),
         "dry_run": settings.FDW_DRY_RUN,
     }
+    context.update(_visuals_context(cycle))
     last_call = cycle.model_calls.order_by("-id").first()
     context["last_call_id"] = last_call.id if last_call else 0
     return render(request, "workflow/cycle_detail.html", context)
+
+
+def _visuals_context(cycle):
+    sets = list(cycle.visuals.select_related("piece"))
+    check = visuals.approved_sourcing(cycle)
+    starting = [r for r in check.results.all() if r.continues] if check else []
+    return {
+        "visual_pieces": [visuals.piece_view(v) for v in sets],
+        "visual_progress": visuals.progress(cycle) if sets else None,
+        "can_start_stage4": cycle.status == Cycle.Status.SOURCING_APPROVED,
+        "stage4_running": cycle.status == Cycle.Status.VISUALS_IN_PROGRESS,
+        "stage4_piece_count": len(starting),
+        "stage4_estimate": visuals.estimate_for(len(starting)),
+        "visuals_limit": settings.FDW_VISUALS_LIMIT_USD,
+        "visuals_spent": cycle.visuals_spend_usd,
+        "image_model": settings.FDW_IMAGE_MODEL,
+        "max_attempts": settings.FDW_MAX_SHOT_ATTEMPTS,
+        "visual_workers": max(1, settings.FDW_VISUAL_WORKERS),
+        "concept_label": visuals.CONCEPT_LABEL,
+        "has_open_work": any(v.status in (PieceVisuals.Status.WRITING, PieceVisuals.Status.MAKING) for v in sets),
+    }
 
 
 @login_required
@@ -442,10 +468,59 @@ def decide_sourcing(request, pk):
     }
     try:
         stages.decide_sourcing(check, decisions, request.POST.get("notes", ""), request.user.get_username())
-        messages.success(request, "Sourcing approved. Visual prototypes, stage 4, follow once the image test has picked a model.")
+        messages.success(request, "Sourcing approved. Start the visual prototypes in stage 4 below.")
     except StageError as exc:
         messages.error(request, str(exc))
     return redirect(f"{reverse('cycle_detail', args=[pk])}#stage-3")
+
+
+# --- Stage 4: visual prototypes ---------------------------------------------------
+
+
+@login_required
+@require_POST
+def start_stage4(request, pk):
+    cycle = get_object_or_404(Cycle, pk=pk)
+    try:
+        count = visuals.start_stage4(cycle)
+        messages.success(request, f"Stage 4 is set up for {count} piece{'s' if count != 1 else ''}. Press Make images to start.")
+    except StageError as exc:
+        messages.error(request, str(exc))
+    return redirect(f"{reverse('cycle_detail', args=[pk])}#stage-4")
+
+
+@login_required
+@require_POST
+def visuals_next(request, pk):
+    """Do one unit of stage 4. The page calls this from several workers until nothing is left."""
+    cycle = get_object_or_404(Cycle, pk=pk)
+    try:
+        result = visuals.work_next(cycle)
+    except StageError as exc:
+        return JsonResponse({"state": "error", "error": str(exc), "progress": visuals.progress(cycle)}, status=409)
+    result["progress"] = visuals.progress(cycle)
+    return JsonResponse(result)
+
+
+@login_required
+@require_POST
+def decide_visuals(request, pk, visuals_pk):
+    piece_set = get_object_or_404(PieceVisuals, pk=visuals_pk, cycle_id=pk)
+    try:
+        visuals.decide(
+            piece_set, request.POST.get("decision", ""), request.POST.get("notes", ""),
+            keep=request.POST.getlist("keep"), user=request.user.get_username(),
+        )
+        messages.success(request, f"Decision saved for {piece_set.piece.name}.")
+    except StageError as exc:
+        messages.error(request, str(exc))
+    return redirect(f"{reverse('cycle_detail', args=[pk])}#piece-{visuals_pk}")
+
+
+@login_required
+def visual_image(request, pk, attempt_pk):
+    attempt = get_object_or_404(ShotAttempt, pk=attempt_pk, visuals__cycle_id=pk)
+    return _file_response(attempt.file)
 
 
 # --- Supplier table -------------------------------------------------------------

@@ -689,3 +689,90 @@ def sourcing_code_checks(item, piece, suppliers, eur_rates, min_margin):
             "and then only to the waitlist until a supplier is confirmed."
         )
     return {"unit_cost": unit_cost, "currency": currency, "margin": margin, "warnings": warnings}
+
+
+# --- Stage 4: visual prototypes ----------------------------------------------------
+
+SHOT_CODES = ("A", "B", "C", "D", "E")
+CHECK_RESULTS = {"match", "mismatch", "not_visible"}
+
+
+def validate_art_direction(data):
+    """Five self-contained prompts and a checklist the reviewer can work through."""
+    if not isinstance(data, dict):
+        raise SchemaError(["Expected a JSON object with prompts and reviewer_checklist."])
+    problems = []
+    prompts_ = data.get("prompts")
+    if not isinstance(prompts_, dict):
+        problems.append("prompts must be an object with keys A, B, C, D and E")
+    else:
+        for shot in SHOT_CODES:
+            text = prompts_.get(shot)
+            if not _is_text(text):
+                problems.append(f"prompts.{shot} must be a non-empty string")
+            elif len(text) < 200:
+                problems.append(f"prompts.{shot} is too short to describe the piece fully")
+    checklist = data.get("reviewer_checklist")
+    if not _string_list(checklist) or not 5 <= len([c for c in checklist if c.strip()]) <= 14:
+        problems.append("reviewer_checklist must be a list of 5 to 14 facts, as strings")
+    missing = data.get("missing_information", [])
+    if not _string_list(missing):
+        problems.append("missing_information must be a list of strings")
+    if problems:
+        raise SchemaError(problems)
+    return {
+        "prompts": {shot: prompts_[shot].strip() for shot in SHOT_CODES},
+        "reviewer_checklist": [c.strip() for c in checklist if c.strip()],
+        "missing_information": [m.strip() for m in missing if m.strip()],
+    }
+
+
+def validate_image_review(data):
+    """The reviewer's verdict on one image.
+
+    Code, not the reviewer, has the last word on two points: a checklist
+    mismatch always fails the image, and a failed image always carries a
+    correction note, because the next attempt is built from that note.
+    """
+    if not isinstance(data, dict):
+        raise SchemaError(["Expected a JSON object for the review."])
+    problems = []
+    results = data.get("checklist_results")
+    if not isinstance(results, list) or not results:
+        problems.append("checklist_results must be a non-empty list")
+        results = []
+    for index, item in enumerate(results):
+        if not isinstance(item, dict) or not _is_text(item.get("fact")):
+            problems.append(f"checklist_results[{index}] needs a fact")
+        elif item.get("result") not in CHECK_RESULTS:
+            problems.append(f"checklist_results[{index}].result must be one of {sorted(CHECK_RESULTS)}")
+    issues = data.get("realism_issues", [])
+    if not _string_list(issues):
+        problems.append("realism_issues must be a list of strings")
+    verdict = data.get("verdict")
+    if verdict not in ("pass", "fail"):
+        problems.append("verdict must be pass or fail")
+    if problems:
+        raise SchemaError(problems)
+    mismatched = [r for r in results if r["result"] == "mismatch"]
+    if mismatched:
+        verdict = "fail"
+    note = str(data.get("correction_note") or "").strip()
+    if verdict == "fail" and not note:
+        if mismatched:
+            note = "Correct these facts: " + "; ".join(
+                f"{r['fact']} (the image showed: {str(r.get('observed') or 'something else').strip()})"
+                for r in mismatched
+            )
+        else:
+            raise SchemaError(["A failed image needs a correction_note saying what the next attempt must show."])
+    return {
+        "checklist_results": [
+            {"fact": r["fact"].strip(), "observed": str(r.get("observed") or "").strip(), "result": r["result"]}
+            for r in results
+        ],
+        "realism_issues": [i.strip() for i in issues if i.strip()],
+        "verdict": verdict,
+        "verdict_overridden": verdict != data.get("verdict"),
+        "correction_note": note if verdict == "fail" else "",
+    }

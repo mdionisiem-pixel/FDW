@@ -11,7 +11,7 @@ from decimal import Decimal
 from django.conf import settings
 
 from . import dryrun
-from .models import ModelCall
+from .models import VISUAL_STEP_PREFIX, ModelCall
 from .schemas import SchemaError
 
 MAX_PAUSE_CONTINUATIONS = 4
@@ -159,7 +159,16 @@ def cost_of(model: str, input_tokens: int, output_tokens: int, web_searches: int
     return cost.quantize(Decimal("0.0001"))
 
 
-def check_spend(cycle) -> None:
+def check_spend(cycle, step: str = "") -> None:
+    if step.startswith(VISUAL_STEP_PREFIX):
+        limit = settings.FDW_VISUALS_LIMIT_USD
+        spent = cycle.visuals_spend_usd
+        if spent >= limit:
+            raise SpendLimitError(
+                f"Visual prototypes for this cycle have cost ${spent:.2f} of their ${limit} limit, so "
+                "no further calls were made. Raise FDW_VISUALS_LIMIT_USD if you want to continue."
+            )
+        return
     limit = settings.FDW_CYCLE_LIMIT_USD
     spent = cycle.spend_usd
     if spent >= limit:
@@ -170,9 +179,12 @@ def check_spend(cycle) -> None:
 
 
 def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, client,
-               web_search_max: int = 0, effort: str = "") -> LLMResult:
-    """Make one model call for a cycle, record it, and return the full result."""
-    check_spend(cycle)
+               web_search_max: int = 0, effort: str = "", images=None) -> LLMResult:
+    """Make one model call for a cycle, record it, and return the full result.
+
+    ``images`` is an optional list of (media_type, base64 data) shown to the model before the prompt.
+    """
+    check_spend(cycle, step)
     cost_of(model, 0, 0)  # raises a clear error for an unpriced model before any money is spent
     is_dry = getattr(client, "dry_run", False)
     try:
@@ -181,6 +193,8 @@ def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, clien
             options["web_search_max"] = web_search_max
         if effort:
             options["effort"] = effort
+        if images:
+            options["images"] = images
         result = client.complete(step, prompt, model, max_tokens, **options)
     except StageError as exc:
         ModelCall.objects.create(
@@ -204,9 +218,10 @@ def run_result(cycle, step: str, prompt: str, model: str, max_tokens: int, clien
     return result
 
 
-def run_call(cycle, step: str, prompt: str, model: str, max_tokens: int, client, effort: str = "") -> str:
+def run_call(cycle, step: str, prompt: str, model: str, max_tokens: int, client, effort: str = "",
+             images=None) -> str:
     """Make one model call for a cycle and return its text."""
-    return run_result(cycle, step, prompt, model, max_tokens, client, effort=effort).text
+    return run_result(cycle, step, prompt, model, max_tokens, client, effort=effort, images=images).text
 
 
 def parse_json(text: str):
@@ -230,14 +245,15 @@ def parse_json(text: str):
         raise SchemaError([f"The response was not valid JSON: {exc}"]) from exc
 
 
-def run_json(cycle, step: str, prompt: str, model: str, max_tokens: int, validator, client, effort: str = ""):
+def run_json(cycle, step: str, prompt: str, model: str, max_tokens: int, validator, client, effort: str = "",
+             images=None):
     """Call the model and return validated JSON.
 
     If the first answer is malformed or fails validation, the model gets one
     more attempt with the problems listed. After that the stage stops, because
     saving unvalidated output would pass errors on to every later stage.
     """
-    text = run_call(cycle, step, prompt, model, max_tokens, client, effort)
+    text = run_call(cycle, step, prompt, model, max_tokens, client, effort, images)
     try:
         return validator(parse_json(text))
     except SchemaError as first:
@@ -247,7 +263,7 @@ def run_json(cycle, step: str, prompt: str, model: str, max_tokens: int, validat
             + "\n- ".join(first.problems[:20])
             + "\n\nReturn the complete corrected JSON and nothing else."
         )
-        text = run_call(cycle, f"{step}_retry", retry_prompt, model, max_tokens, client, effort)
+        text = run_call(cycle, f"{step}_retry", retry_prompt, model, max_tokens, client, effort, images)
         try:
             return validator(parse_json(text))
         except SchemaError as second:

@@ -690,11 +690,131 @@
                   <button class="btn btn-primary" type="submit">Approve sourcing sheet</button>
                 </div>
               </div>
-            {% elif sourcing.status == 'approved' %}
-              <p class="stage-intro">Visual prototypes, stage 4, are built after the image test on the Image test page has picked a model.</p>
             {% endif %}
           </form>
         </div>
+      {% endif %}
+    </section>
+
+    <!-- Stage 4 -->
+    <section class="stage {% if cycle.stage_number < 4 %}stage-locked{% endif %}" id="stage-4" aria-labelledby="stage-4-title">
+      <h2 id="stage-4-title">Visual prototypes</h2>
+      {% if cycle.stage_number < 4 %}
+        <p class="stage-intro">Unlocks when you approve the sourcing sheet.</p>
+      {% else %}
+        <p class="stage-intro">Five shots per piece, drawn by {{ image_model }}. Shot A comes first and every other shot is drawn from it, so the piece stays the same across the set. A separate reviewer checks each image against the specification, colour strictly; a failed image is drawn again with the reviewer's correction, up to {{ max_attempts }} times. Only then does it reach you.</p>
+      {% endif %}
+
+      {% if can_start_stage4 %}
+        <form method="post" action="{% url 'start_stage4' cycle.pk %}" class="run-row">
+          {% csrf_token %}
+          <button class="btn btn-primary" type="submit">Set up visual prototypes</button>
+          <p class="meta">{{ stage4_piece_count }} piece{{ stage4_piece_count|pluralize }} kept at gate 3. Expected cost about ${{ stage4_estimate }}; stage 4 stops at ${{ visuals_limit }} for this cycle whatever happens.</p>
+        </form>
+      {% endif %}
+
+      {% if visual_progress %}
+        <div class="make visual-make" id="visual-make" data-url="{% url 'visuals_next' cycle.pk %}" data-workers="{{ visual_workers }}">
+          <div class="spend-track make-track" role="progressbar" aria-label="Shots finished" aria-valuemin="0" aria-valuemax="{{ visual_progress.shots }}" aria-valuenow="{{ visual_progress.resolved }}">
+            <div class="spend-fill" id="visual-fill" style="width: {% widthratio visual_progress.resolved visual_progress.shots 100 %}%"></div>
+          </div>
+          <p class="meta" id="visual-status">{{ visual_progress.resolved }} of {{ visual_progress.shots }} shots finished, {{ visual_progress.made }} image{{ visual_progress.made|pluralize }} made, {{ visual_progress.ready }} piece{{ visual_progress.ready|pluralize }} awaiting your decision. Spent ${{ visual_progress.spent }} of ${{ visual_progress.limit }}.</p>
+          <p class="meta visual-last" id="visual-last" aria-live="polite"></p>
+          {% csrf_token %}
+          {% if stage4_running and has_open_work %}<button class="btn btn-primary" type="button" id="visual-button">Make images</button>
+          <p class="meta">Keep this tab open while images are made. Closing it loses nothing: press the button again to carry on.</p>{% endif %}
+        </div>
+      {% endif %}
+
+      {% for pv in visual_pieces %}
+        <article class="visual-piece status-{{ pv.visuals.status }}" id="piece-{{ pv.visuals.pk }}">
+          <div class="sourcing-head">
+            <h3>{{ pv.piece.name }} <span class="meta">{{ pv.piece.piece_id }}{% if pv.visuals.round > 1 %}, round {{ pv.visuals.round }}{% endif %}</span></h3>
+            <p class="stamp {% if pv.visuals.status == 'approved' %}stamp-approved{% elif pv.visuals.status == 'rejected' %}stamp-rejected{% elif pv.visuals.status == 'ready' %}stamp-pending{% else %}stamp-not_selected{% endif %}">{{ pv.visuals.get_status_display }}</p>
+          </div>
+          <p class="meta"><span class="piece-tier tier-{{ pv.piece.production_route }}">{{ pv.piece.tier }}</span> €{{ pv.piece.target_price_eur|floatformat:0 }}{% if pv.visuals.waitlist_only %} · <strong>Waitlist only</strong> until a supplier is confirmed{% endif %}</p>
+          {% if pv.visuals.error %}<div class="issues issues-blocking"><h4>Writing the prompts stopped</h4><p>{{ pv.visuals.error }}</p></div>{% endif %}
+          {% if pv.visuals.accepted_changes %}
+            <div class="issues"><h4>Drawn with the changes you accepted at gate 3</h4><ul>{% for c in pv.visuals.accepted_changes %}<li>{{ c }}</li>{% endfor %}</ul></div>
+          {% endif %}
+          {% if pv.visuals.missing_information %}
+            <details class="fold"><summary>Not in the specification ({{ pv.visuals.missing_information|length }})</summary>
+              <p class="meta">The art director left these out rather than guess. Add them in your notes if they matter.</p>
+              <ul class="plain">{% for m in pv.visuals.missing_information %}<li>{{ m }}</li>{% endfor %}</ul>
+            </details>
+          {% endif %}
+
+          {% if pv.visuals.status != 'writing' %}
+            <ol class="shot-grid">
+              {% for s in pv.shots %}
+                <li class="shot shot-{{ s.state }}">
+                  <figure>
+                    {% if s.shown and s.shown.file %}
+                      <a href="{% url 'visual_image' cycle.pk s.shown.pk %}" target="_blank" rel="noopener"><img src="{% url 'visual_image' cycle.pk s.shown.pk %}" alt="Shot {{ s.code }}, {{ s.name }}, of {{ pv.piece.name }}" loading="lazy"></a>
+                      <p class="render-label">{{ concept_label }}</p>
+                    {% else %}
+                      <div class="shot-empty" aria-hidden="true"><span>{{ s.code }}</span></div>
+                    {% endif %}
+                    <figcaption>
+                      <strong>{{ s.code }}. {{ s.name }}</strong>
+                      <span class="shot-state">{{ s.label }}{% if s.made %} · {{ s.made }} attempt{{ s.made|pluralize }}{% endif %}</span>
+                      {% if s.error and s.state == 'working' %}<span class="failed">{{ s.error|truncatechars:160 }}</span>{% endif %}
+                    </figcaption>
+                  </figure>
+                  {% if s.attempts %}
+                    <details class="fold review-fold"><summary>Review notes</summary>
+                      {% for a in s.attempts %}
+                        <div class="review-attempt">
+                          <p><strong>Attempt {{ a.attempt }}</strong>: {{ a.get_status_display }}{% if a.cost_usd is not None %} <span class="meta">${{ a.cost_usd }}{% if a.cost_estimated %} est.{% endif %}</span>{% endif %}{% if a.file and a != s.shown %} <a href="{% url 'visual_image' cycle.pk a.pk %}" target="_blank" rel="noopener">view</a>{% endif %}</p>
+                          {% if a.review %}
+                            <ul class="checklist">
+                              {% for r in a.review.checklist_results %}<li class="check-{{ r.result }}">{{ r.fact }}{% if r.result != 'match' %} <span class="meta">({{ r.result|label }}: {{ r.observed }})</span>{% endif %}</li>{% endfor %}
+                            </ul>
+                            {% for i in a.review.realism_issues %}<p class="meta">Realism: {{ i }}</p>{% endfor %}
+                            {% if a.correction_note %}<p class="meta">Correction: {{ a.correction_note }}</p>{% endif %}
+                          {% elif a.error %}<p class="failed">{{ a.error|truncatechars:240 }}</p>{% endif %}
+                        </div>
+                      {% endfor %}
+                    </details>
+                  {% endif %}
+                </li>
+              {% endfor %}
+            </ol>
+          {% endif %}
+
+          {% if pv.visuals.status == 'ready' %}
+            <form method="post" action="{% url 'decide_visuals' cycle.pk pv.visuals.pk %}" class="gate">
+              {% csrf_token %}
+              <h3>Gate 4: {{ pv.piece.name }}</h3>
+              {% if pv.a_stuck %}
+                <p>The front packshot did not pass review in {{ max_attempts }} attempts, so the other four shots were not drawn from it. Keep its best attempt and draw the rest from it, request changes for a new round, or reject the piece.</p>
+              {% else %}
+                <p>{{ pv.passed }} of 5 shots passed review. Every image is labelled as a concept render wherever it is shown.</p>
+                {% if pv.below_standard %}
+                  <fieldset class="decide"><legend>Shots that could not meet the standard</legend>
+                    <p class="meta">Ticked shots go forward with the piece; unticked ones are left out.</p>
+                    {% for s in pv.below_standard %}<label class="pick"><input type="checkbox" name="keep" value="{{ s.code }}"> <span>Keep shot {{ s.code }}, {{ s.name|lower }}</span></label>{% endfor %}
+                  </fieldset>
+                {% endif %}
+              {% endif %}
+              <label for="notes-{{ pv.visuals.pk }}">Notes</label>
+              <textarea id="notes-{{ pv.visuals.pk }}" name="notes" rows="2" placeholder="Needed to request changes: what should be different, for example the hem colour or the motif size."></textarea>
+              <div class="gate-actions">
+                {% if pv.a_stuck %}
+                  <button class="btn btn-primary" type="submit" name="decision" value="continue">Keep best packshot and continue</button>
+                {% else %}
+                  <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve piece</button>
+                {% endif %}
+                <button class="btn" type="submit" name="decision" value="changes">Request changes</button>
+                <button class="btn btn-danger" type="submit" name="decision" value="reject">Reject piece</button>
+              </div>
+            </form>
+          {% endif %}
+        </article>
+      {% endfor %}
+
+      {% if cycle.status == 'visuals_approved' %}
+        <p class="stage-intro">Visual prototypes approved. 3D generation, stage 5, is not built yet.</p>
       {% endif %}
     </section>
 

@@ -56,6 +56,10 @@ class BrandBrief(models.Model):
         return self.text.count("(To confirm)")
 
 
+# Model calls whose step starts with this belong to stage 4 and count toward its budget.
+VISUAL_STEP_PREFIX = "visual_"
+
+
 class Cycle(models.Model):
     """One pass from market research to a chosen collection."""
 
@@ -73,6 +77,8 @@ class Cycle(models.Model):
         CONCEPTS_SELECTED = "concepts_selected", "Collection selected"
         SOURCING_PENDING = "sourcing_pending", "Sourcing sheet awaiting approval"
         SOURCING_APPROVED = "sourcing_approved", "Sourcing approved"
+        VISUALS_IN_PROGRESS = "visuals_in_progress", "Visual prototypes in progress"
+        VISUALS_APPROVED = "visuals_approved", "Visual prototypes approved"
 
     name = models.CharField(max_length=120)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.NEW)
@@ -103,8 +109,23 @@ class Cycle(models.Model):
 
     @property
     def spend_usd(self) -> Decimal:
-        total = self.model_calls.aggregate(total=Sum("cost_usd"))["total"]
+        """Claude spend for stages 1 to 3, held to FDW_CYCLE_LIMIT_USD.
+
+        Stage 4 has its own budget, FDW_VISUALS_LIMIT_USD, because images cost
+        far more than text; see visuals_spend_usd.
+        """
+        total = self.model_calls.exclude(step__startswith=VISUAL_STEP_PREFIX).aggregate(
+            total=Sum("cost_usd"))["total"]
         return total or Decimal("0")
+
+    @property
+    def visuals_spend_usd(self) -> Decimal:
+        """Everything stage 4 has cost: images as reported, plus the Claude calls that write and review them."""
+        claude = self.model_calls.filter(step__startswith=VISUAL_STEP_PREFIX).aggregate(
+            total=Sum("cost_usd"))["total"] or Decimal("0")
+        images = ShotAttempt.objects.filter(visuals__cycle=self).aggregate(
+            total=Sum("cost_usd"))["total"] or Decimal("0")
+        return claude + images
 
     @property
     def approved_brief(self):
@@ -123,7 +144,9 @@ class Cycle(models.Model):
             return 2
         if self.status in (self.Status.CONCEPTS_SELECTED, self.Status.SOURCING_PENDING):
             return 3
-        return 4
+        if self.status in (self.Status.SOURCING_APPROVED, self.Status.VISUALS_IN_PROGRESS):
+            return 4
+        return 5
 
     @property
     def selected_pieces(self):
@@ -562,3 +585,113 @@ class BakeoffImage(models.Model):
     def average_score(self):
         values = [getattr(self, f) for f in self.SCORE_FIELDS if getattr(self, f) is not None]
         return round(sum(values) / len(values), 2) if values else None
+
+
+# --- Stage 4: visual prototypes ------------------------------------------------
+
+SHOTS = (
+    ("A", "Front packshot"),
+    ("B", "Back packshot"),
+    ("C", "Detail macro"),
+    ("D", "On-model, studio"),
+    ("E", "On-model, lifestyle"),
+)
+
+
+class PieceVisuals(models.Model):
+    """The five shots of one piece in one cycle, and the founder's decision on them at gate 4."""
+
+    class Status(models.TextChoices):
+        WRITING = "writing", "Writing shot prompts"
+        MAKING = "making", "Making and reviewing images"
+        READY = "ready", "Awaiting your decision"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    cycle = models.ForeignKey(Cycle, on_delete=models.CASCADE, related_name="visuals")
+    piece = models.ForeignKey(Piece, on_delete=models.CASCADE, related_name="visuals")
+    # A request for changes at gate 4 starts a new round; earlier rounds stay in the record.
+    round = models.PositiveSmallIntegerField(default=1)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.WRITING)
+    # Written by the art director step.
+    prompts = models.JSONField(default=dict, blank=True)
+    checklist = models.JSONField(default=list, blank=True)
+    missing_information = models.JSONField(default=list, blank=True)
+    # Copied from gate 3, so the images show the piece as it will be made.
+    accepted_changes = models.JSONField(default=list, blank=True)
+    waitlist_only = models.BooleanField(default=False)
+    founder_notes = models.TextField(blank=True)
+    error = models.TextField(blank=True)
+    # Set while a worker is writing the prompts, so two workers never write them twice.
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["piece__piece_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["cycle", "piece"], name="one_visual_set_per_piece"),
+        ]
+
+    def __str__(self):
+        return f"{self.piece} visuals, round {self.round}"
+
+    def current_attempts(self):
+        return self.attempts.filter(round=self.round)
+
+
+class ShotAttempt(models.Model):
+    """One generated image for one shot, and the reviewer's verdict on it.
+
+    Its key (piece set, round, shot, attempt) is unique, so a step that runs
+    again after a failure finds the existing row instead of paying twice.
+    """
+
+    MAX_ERRORS = 2
+
+    class Status(models.TextChoices):
+        WAITING = "waiting", "Waiting"
+        RUNNING = "running", "Being made"
+        PASSED = "passed", "Passed review"
+        FAILED = "failed", "Failed review"
+
+    visuals = models.ForeignKey(PieceVisuals, on_delete=models.CASCADE, related_name="attempts")
+    round = models.PositiveSmallIntegerField(default=1)
+    shot = models.CharField(max_length=1, choices=SHOTS)
+    attempt = models.PositiveSmallIntegerField(default=1)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.WAITING)
+    prompt = models.TextField()
+    model = models.CharField(max_length=120, blank=True)
+    # Primary keys of the attempts sent to the image model as reference images.
+    references = models.JSONField(default=list, blank=True)
+    file = models.FileField(upload_to="visuals/", blank=True)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    cost_estimated = models.BooleanField(default=False)
+    seconds = models.FloatField(null=True, blank=True)
+    review = models.JSONField(null=True, blank=True)
+    correction_note = models.TextField(blank=True)
+    error = models.TextField(blank=True)
+    error_count = models.PositiveSmallIntegerField(default=0)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    # The founder kept this image at gate 4 although it did not pass review.
+    accepted = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["round", "shot", "attempt"]
+        constraints = [
+            models.UniqueConstraint(fields=["visuals", "round", "shot", "attempt"], name="one_row_per_attempt"),
+        ]
+
+    def __str__(self):
+        return f"{self.visuals.piece.piece_id} {self.shot} round {self.round} attempt {self.attempt}"
+
+    @property
+    def matches(self) -> int:
+        results = (self.review or {}).get("checklist_results") or []
+        return sum(1 for r in results if r.get("result") == "match")
+
+    @property
+    def mismatches(self) -> int:
+        results = (self.review or {}).get("checklist_results") or []
+        return sum(1 for r in results if r.get("result") == "mismatch")

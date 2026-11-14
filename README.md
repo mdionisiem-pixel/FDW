@@ -10,7 +10,7 @@ This covers the first three of seven stages:
 | 1. Market research | Built | Researches the whole fashion market, compares the target season across earlier years with what is rising now, and builds a strategic report: headline and takeaways, an opportunity matrix, a timeline of each theme, reported growth figures, published forecasts, a category view, and recommendations. Nothing needs to be typed |
 | 2. Collection concepts | Built | Plans three new collections in one call, then specifies each in its own call so no answer is cut off; reviews each one separately; you pick one or two |
 | 3. Sourcing check | Built | Checks every approved piece against your supplier table: route, candidate suppliers, unit cost traced to a price you entered, gross margin worked out in code, and questions for the supplier. You decide per piece: continue, continue without a supplier (waitlist only), or drop |
-| 4. Visual prototypes | Not built | Slice 2 |
+| 4. Visual prototypes | Built | Five shots per piece (front, back, detail, on-model studio, on-model lifestyle) drawn by the image model the image test picked. Each image is checked by a separate reviewer against the specification, colour strictly, and redrawn with its correction up to three times. You approve, request changes or reject each piece. Stops at `FDW_VISUALS_LIMIT_USD` (default $15) per cycle |
 | 5. 3D generation | Not built | Slice 3 |
 | 6. Price test | Not built | Slice 3 |
 | 7. Launch kit and learning | Not built | Slice 3 |
@@ -84,6 +84,29 @@ the models in `FDW_BAKEOFF_MODELS`; "Check available models" lists what your key
 reach. Spending stops at `FDW_BAKEOFF_LIMIT_USD` (default $10). Photos and generated
 images are stored in `media/`, which is not committed, and are shown only to signed-in
 users.
+
+## Visual prototypes (stage 4)
+
+After gate 3, press **Set up visual prototypes**, then **Make images**. The page makes
+several images at once (`FDW_VISUAL_WORKERS`, default 3); keep the tab open while it
+runs. Closing it loses nothing; press the button again to carry on.
+
+For each piece kept at gate 3, Claude writes five shot prompts and a checklist from the
+specification and the changes you accepted at sourcing. Shot A is drawn first; B and C
+are drawn from A, D from A and B, E from A and D. Only images that passed review, or that
+you kept, are used as references. A separate Claude call reviews every image against the
+checklist; a failed image is redrawn with the reviewer's correction note, up to
+`FDW_MAX_SHOT_ATTEMPTS` (default 3) times, and then reaches you marked "could not meet
+standard" with its best attempt. If the front packshot cannot meet the standard, the
+piece stops there and you choose whether to continue from its best attempt.
+
+Stage 4 has its own budget, `FDW_VISUALS_LIMIT_USD` (default $15 per cycle): images as
+OpenRouter reports them, plus the Claude calls that write and review them. Before each
+image, the expected cost is set aside, so parallel work cannot pass the limit. The
+research budget, `FDW_CYCLE_LIMIT_USD`, now covers stages 1 to 3 only.
+
+The app checks at startup that its libraries are installed, and refuses to start with
+the fix to run if one is missing.
 
 ## Guardrails
 

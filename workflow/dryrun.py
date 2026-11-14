@@ -461,6 +461,62 @@ def _sourcing(prompt: str) -> str:
     })
 
 
+def _art_direction(prompt: str) -> str:
+    try:
+        spec = json.loads(_between(prompt, "piece_specification"))
+    except (ValueError, TypeError):
+        spec = {}
+    name = spec.get("name") or "the piece"
+    colours = ", ".join(
+        f"{c.get('name')} ({c.get('hex')})" for c in spec.get("colours", []) if isinstance(c, dict)
+    ) or "the specified colours"
+    body = (
+        f"{name}, {spec.get('category', 'garment')}, {spec.get('silhouette', '')}. "
+        f"Made in {spec.get('technique', 'the specified technique')}: {spec.get('construction', '')}. "
+        f"Materials: {spec.get('materials', '')}. Surface detail: {spec.get('surface_detail', '')}. "
+        f"Colours: {colours}. Sample prompt written by the dry run; no model was called."
+    )
+    setups = {
+        "A": "Front packshot on a seamless off-white background, soft overhead light, 85 mm, f/8.",
+        "B": "Back packshot, the same piece as in the reference image, same light, 85 mm, f/8.",
+        "C": "Detail macro of the signature detail, the same piece as in the reference image, 100 mm macro, f/5.6, raking light.",
+        "D": "On-model studio shot, the same piece as in the reference images, warm-grey background, 85 mm, f/4.",
+        "E": "On-model lifestyle shot, the same model and piece as in the reference images, daylight, 50 mm, f/2.8.",
+    }
+    return json.dumps({
+        "piece_id": spec.get("piece_id", ""),
+        "prompts": {shot: f"{body} {setup} No text, logos or watermarks." for shot, setup in setups.items()},
+        "reviewer_checklist": [
+            f"Sample fact: the piece is a {spec.get('category', 'garment')}",
+            f"Sample fact: colours are {colours}",
+            "Sample fact: the signature detail is placed as specified",
+            "Sample fact: stitch scale matches the yarn weight",
+            "Sample fact: hems and closures are where the specification puts them",
+        ],
+        "missing_information": ["Sample: the dry run did not check the specification for gaps."],
+    })
+
+
+def _image_review(prompt: str) -> str:
+    """Pass every image, except the first try at a detail macro, so the retry path can be seen."""
+    shot = _between(prompt, "shot_type").split(":")[0].strip() or "A"
+    first_try = "Earlier attempts at this shot failed" not in prompt
+    failing = shot == "C" and first_try
+    return json.dumps({
+        "piece_id": "",
+        "shot": shot,
+        "checklist_results": [
+            {"fact": "Sample fact: overall shape", "observed": "Sample observation", "result": "match"},
+            {"fact": "Sample fact: stitch scale", "observed": "Sample observation",
+             "result": "mismatch" if failing else "match"},
+        ],
+        "realism_issues": [],
+        "verdict": "fail" if failing else "pass",
+        "correction_note": "Sample correction: the stitches must be readable one by one, about 6 mm wide."
+        if failing else "",
+    })
+
+
 def respond(step: str, prompt: str) -> str:
     base = step.removesuffix("_retry")
     if base == "extract_signals":
@@ -495,4 +551,8 @@ def respond(step: str, prompt: str) -> str:
         return _revise(prompt)
     if base == "sourcing_check":
         return _sourcing(prompt)
+    if base == "visual_art_direction":
+        return _art_direction(prompt)
+    if base == "visual_review":
+        return _image_review(prompt)
     raise ValueError(f"No dry-run response is defined for step '{step}'.")

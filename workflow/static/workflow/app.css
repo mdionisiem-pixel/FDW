@@ -735,3 +735,33 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
   .sourcing-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* Stage 4: visual prototypes */
+.visual-make { margin-bottom: 1.25rem; }
+.visual-last { min-height: 1.4em; }
+.visual-piece { border: 1.5px solid var(--line); border-left-width: 6px; border-radius: var(--radius); padding: 1rem 1.25rem; background: var(--paper); margin-top: 1.25rem; }
+.visual-piece.status-ready { border-left-color: var(--ochre); }
+.visual-piece.status-approved { border-left-color: var(--moss); }
+.visual-piece.status-rejected { border-left-color: var(--floss); opacity: 0.8; }
+.shot-grid { list-style: none; margin: 1rem 0 0; padding: 0; display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fill, minmax(min(9rem, 45%), 1fr)); }
+.shot { border: 1.5px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--paper); display: flex; flex-direction: column; }
+.shot figure { margin: 0; position: relative; }
+.shot img, .shot-empty { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; display: block; background: var(--chalk); }
+.shot-empty { display: grid; place-items: center; color: var(--line); font-family: var(--display); font-size: 2.5rem; }
+.shot-working .shot-empty { background: repeating-linear-gradient(-45deg, var(--chalk) 0 10px, #f3f6f7 10px 20px); background-size: 28px 28px; animation: shot-wait 1.2s linear infinite; }
+@keyframes shot-wait { to { background-position: 28px 0; } }
+.render-label { position: absolute; left: 0.4rem; right: 0.4rem; top: 0.4rem; margin: 0; font-size: 0.7rem; line-height: 1.3; padding: 0.2rem 0.45rem; border-radius: 6px; background: rgba(27, 33, 64, 0.78); color: #fff; }
+.shot figcaption { padding: 0.55rem 0.7rem 0.6rem; display: grid; gap: 0.15rem; font-size: 0.88rem; }
+.shot-state { color: var(--ink-soft); font-size: 0.82rem; }
+.shot-passed { border-color: var(--moss); }
+.shot-passed .shot-state { color: var(--moss); font-weight: 600; }
+.shot-could_not_meet { border-color: var(--floss); }
+.shot-could_not_meet .shot-state { color: var(--floss-deep); font-weight: 600; }
+.shot-kept .shot-state { color: var(--ochre); font-weight: 600; }
+.review-fold { border-top: 1.5px solid var(--line); margin: 0; padding: 0.45rem 0.7rem; font-size: 0.82rem; }
+.review-attempt { padding-top: 0.45rem; }
+.review-attempt p { margin: 0.2rem 0; }
+.checklist { margin: 0.2rem 0; padding-left: 1.1rem; }
+.checklist .check-mismatch { color: var(--floss-deep); }
+.checklist .check-not_visible { color: var(--ink-soft); }
+@media (prefers-reduced-motion: reduce) { .shot-working .shot-empty { animation: none; } }
