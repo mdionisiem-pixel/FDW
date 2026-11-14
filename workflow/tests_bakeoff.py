@@ -258,6 +258,9 @@ class BakeoffScreenTests(TestCase):
         self.assertEqual(p.images.count(), 4)
         for _ in range(10):
             body = self.client.post(reverse("bakeoff_make_next", args=[p.pk])).json()
+            # The feed line names the shot but never the model: images are scored blind.
+            self.assertRegex(body["did"], r": (made|failed)\.$")
+            self.assertNotIn("m/", body["did"])
             if body["finished"]:
                 break
         self.assertEqual(p.images.filter(status="done").count(), 4)

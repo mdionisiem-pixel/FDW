@@ -174,6 +174,8 @@ class ReviewerScreenTests(TestCase):
         self.client.post(reverse("bakeoff_reviewer_start"))
         body = self.client.post(reverse("bakeoff_reviewer_next")).json()
         self.assertTrue(body["finished"])
+        # The activity feed line leads with whether the reviewer agrees with the founder.
+        self.assertRegex(body["did"], r"^(Agrees|Disagrees) with you: Knitted Hat, front packshot, (passed|failed)\.$")
         page = self.client.get(reverse("bakeoff_reviewer"))
         self.assertContains(page, "Not enough evidence yet")
         self.assertContains(page, "Image by image")

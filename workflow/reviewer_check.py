@@ -157,6 +157,16 @@ def review_next(run: ReviewerRun, client=None):
     return result
 
 
+def describe(result: ReviewerResult) -> str:
+    """One line for the page's activity feed: what was reviewed and whether the reviewer agrees with the founder."""
+    if result.status != ReviewerResult.Status.DONE:
+        return f"Review could not be used: {result.label}."
+    # The agreement leads, so it survives when a narrow screen cuts the line short.
+    agreement = "Agrees with you" if result.agrees else "Disagrees with you"
+    verdict = "passed" if result.verdict == "pass" else "failed"
+    return f"{agreement}: {result.label}, {verdict}."
+
+
 def progress(run: ReviewerRun) -> dict:
     results = list(run.results.all())
     done = sum(1 for r in results if r.status == ReviewerResult.Status.DONE)

@@ -148,7 +148,12 @@
       </div>
       <p id="working-title" class="working-title">Working</p>
       <p class="working-quip" id="working-quip" aria-hidden="true"></p>
-      <p class="working-progress" id="working-progress" aria-live="polite" hidden></p>
+      <dl class="work-stats working-stats" id="working-stats">
+        <div><dt>Elapsed</dt><dd data-stat="elapsed">0 s</dd></div>
+        <div class="working-steps"><dt>Steps done</dt><dd data-stat="steps">0</dd></div>
+        <div class="working-steps"><dt>Last step</dt><dd data-stat="last">&ndash;</dd></div>
+      </dl>
+      <ol class="work-feed working-steps" id="working-feed" aria-live="polite" aria-label="Steps finished"><li class="work-feed-empty">Each finished step will appear here.</li></ol>
       <p class="working-note">Keep this tab open; the page updates when it finishes.</p>
     </div>
   </div>

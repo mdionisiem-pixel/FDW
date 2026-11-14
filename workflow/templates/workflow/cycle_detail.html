@@ -716,7 +716,7 @@
 
       {% if visual_progress %}
         <div class="make visual-make" id="visual-make" data-url="{% url 'visuals_next' cycle.pk %}" data-workers="{{ visual_workers }}" data-loader="crochet" data-quips="images">
-          <div class="inline-working" hidden aria-hidden="true"><div class="loaders inline-loaders"></div><p class="working-quip"></p></div>
+          {% include "workflow/includes/work_card.html" with title="Making visual prototypes" done_label="Shots" show_spend=True spend_limit=visuals_limit %}
 
           <div class="spend-track make-track" role="progressbar" aria-label="Shots finished" aria-valuemin="0" aria-valuemax="{{ visual_progress.shots }}" aria-valuenow="{{ visual_progress.resolved }}">
             <div class="spend-fill" id="visual-fill" style="width: {% widthratio visual_progress.resolved visual_progress.shots 100 %}%"></div>

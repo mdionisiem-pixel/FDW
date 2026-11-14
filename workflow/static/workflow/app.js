@@ -73,6 +73,13 @@
       "Squinting at the colour of that red",
       "Being strict, as instructed"
     ],
+    models: [
+      "Asking the haberdasher what is in stock",
+      "Counting the needles in the drawer",
+      "Reading the price tags",
+      "Checking which machines are plugged in",
+      "Sorting the threads by colour"
+    ],
     general: [
       "Threading the needle",
       "Untangling a stubborn knot",
@@ -87,6 +94,7 @@
     ["/stage-3/", "sourcing"],
     ["/stage-4/", "images"],
     ["/bakeoff/reviewer/", "review"],
+    ["/check-models/", "models"],
     ["/bakeoff/", "images"]
   ];
   function quipsFor(action) {
@@ -95,28 +103,93 @@
     }
     return "general";
   }
+  var REDUCED_MOTION = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // Rotate the captions. Each change fades out, swaps the text and fades back in,
+  // and the line keeps a fixed height, so nothing around it moves.
   function startQuips(line, key) {
     var list = QUIPS[key] || QUIPS.general;
     var index = Math.floor(Math.random() * list.length);
+    var swapTimer = null;
     var put = function () {
-      line.textContent = list[index % list.length] + "\u2026";
+      var text = list[index % list.length] + "\u2026";
       index += 1;
+      if (REDUCED_MOTION || !line.textContent) { line.textContent = text; return; }
+      line.classList.add("is-swapping");
+      swapTimer = setTimeout(function () {
+        line.textContent = text;
+        line.classList.remove("is-swapping");
+      }, 260);
     };
     put();
     var timer = setInterval(put, 4500);
-    return function () { clearInterval(timer); line.textContent = ""; };
+    return function () {
+      clearInterval(timer);
+      clearTimeout(swapTimer);
+      line.classList.remove("is-swapping");
+      line.textContent = "";
+    };
   }
-
-  // Loaders inside a panel, for work the page drives itself one request at a
-  // time (making and reviewing images), where a full-screen overlay would stop
-  // you reading the results as they arrive. Each copies one of the overlay's
-  // loaders, so they look and move the same.
+  function duration(seconds) {
+    seconds = Math.max(0, Math.round(seconds));
+    var minutes = Math.floor(seconds / 60);
+    if (minutes >= 60) return Math.floor(minutes / 60) + " h " + (minutes % 60) + " min";
+    return minutes ? minutes + " min " + (seconds % 60) + " s" : seconds + " s";
+  }
+  function stamp(seconds) {
+    seconds = Math.max(0, Math.floor(seconds));
+    var s = seconds % 60;
+    return Math.floor(seconds / 60) + ":" + (s < 10 ? "0" : "") + s;
+  }
+  // Keep the newest few lines in a feed list, newest first.
+  function pushFeed(feed, text, at, failed, keep) {
+    if (!feed || !text) return;
+    var empty = feed.querySelector(".work-feed-empty");
+    if (empty) empty.remove();
+    var item = document.createElement("li");
+    if (failed) item.className = "is-failed";
+    var time = document.createElement("span");
+    time.className = "work-feed-time";
+    time.textContent = stamp(at);
+    item.appendChild(time);
+    item.appendChild(document.createTextNode(" " + text));
+    item.title = text;
+    feed.insertBefore(item, feed.firstChild);
+    while (feed.children.length > (keep || 3)) feed.removeChild(feed.lastChild);
+  }
+  // The in-panel work card: a sewing loader, a caption, live numbers and the
+  // last few results. Loops call update() with their progress and note() with
+  // each finished item; the card works out the pace and the time left.
   function inlineLoader(panel) {
     var box = panel && panel.querySelector(".inline-working");
-    if (!box) return { start: function () {}, stop: function () {} };
+    var nothing = function () {};
+    if (!box) return { start: nothing, stop: nothing, update: nothing, set: nothing, note: nothing };
     var stage = box.querySelector(".inline-loaders");
     var line = box.querySelector(".working-quip");
+    var feed = box.querySelector(".work-feed");
+    var thread = box.querySelector(".work-thread");
+    var stat = function (name) { return box.querySelector('[data-stat="' + name + '"]'); };
     var stopQuips = null;
+    var ticker = null;
+    var started = 0;
+    var firstFinished = null;
+    var finished = 0;
+    var total = 0;
+    var render = function () {
+      var elapsed = (Date.now() - started) / 1000;
+      var made = firstFinished === null ? 0 : finished - firstFinished;
+      var left = Math.max(0, total - finished);
+      stat("elapsed").textContent = duration(elapsed);
+      stat("done").textContent = total ? finished + " of " + total : "\u2013";
+      if (thread) thread.style.setProperty("--done", total ? Math.min(100, finished / total * 100) + "%" : "0%");
+      if (made > 0 && elapsed > 0) {
+        var each = elapsed / made;
+        stat("pace").textContent = duration(each) + " each";
+        stat("eta").textContent = left ? "about " + duration(each * left) : "finishing";
+      } else {
+        stat("pace").textContent = "measuring";
+        stat("eta").textContent = "measuring";
+      }
+    };
     return {
       start: function () {
         if (!stage.firstElementChild) {
@@ -129,15 +202,44 @@
             stage.appendChild(copy);
           }
         }
+        started = Date.now();
+        // Measure the pace from what was already finished when this run began.
+        var bar = panel.querySelector("[role=progressbar]");
+        if (bar) {
+          finished = parseInt(bar.getAttribute("aria-valuenow"), 10) || 0;
+          total = parseInt(bar.getAttribute("aria-valuemax"), 10) || 0;
+        }
+        firstFinished = finished;
         box.hidden = false;
+        panel.classList.add("is-running");
         if (!stopQuips) stopQuips = startQuips(line, panel.getAttribute("data-quips") || "general");
+        render();
+        clearInterval(ticker);
+        ticker = setInterval(render, 1000);
       },
       stop: function () {
         box.hidden = true;
+        panel.classList.remove("is-running");
+        clearInterval(ticker);
+        ticker = null;
         if (stopQuips) { stopQuips(); stopQuips = null; }
+      },
+      update: function (done, all) {
+        if (firstFinished === null || done < firstFinished) firstFinished = done;
+        finished = done;
+        total = all;
+        if (started) render();
+      },
+      set: function (name, text) {
+        var cell = stat(name);
+        if (cell) cell.textContent = text;
+      },
+      note: function (text, failed) {
+        pushFeed(feed, text, (Date.now() - started) / 1000, failed);
       }
     };
   }
+
 
   // Build the repeated parts of two loaders once: the heart's X stitches and the chain loops.
   var SVG = "http://www.w3.org/2000/svg";
@@ -189,35 +291,37 @@
     if (/_retry$/.test(step)) return "Corrected an answer that did not pass checks";
     return STEP_LABELS[step] || "Finished a step";
   }
+  // Live numbers in the working overlay. Pages that log model calls (the cycle
+  // page) also list each finished step; other forms show the elapsed time only.
   function startProgress() {
-    var line = document.getElementById("working-progress");
+    var stats = document.getElementById("working-stats");
+    if (!stats) return;
+    var feed = document.getElementById("working-feed");
     var source = document.querySelector("[data-progress-url]");
-    if (!line) return;
+    var tracked = Boolean(source && window.fetch);
+    var stat = function (name) { return stats.querySelector('[data-stat="' + name + '"]'); };
+    document.querySelectorAll("#working .working-steps").forEach(function (el) { el.hidden = !tracked; });
+    stats.classList.toggle("is-single", !tracked);
     var started = Date.now();
-    var done = [];
-    function clock() {
-      var seconds = Math.floor((Date.now() - started) / 1000);
-      var minutes = Math.floor(seconds / 60);
-      return minutes ? minutes + " min " + (seconds % 60) + " s" : seconds + " s";
-    }
-    function render() {
-      var text = clock() + " so far";
-      if (done.length) {
-        var last = done[done.length - 1];
-        text = done.length + " step" + (done.length === 1 ? "" : "s") + " done, last: " +
-          stepLabel(last.step).toLowerCase() + (last.ok ? "" : " (failed)") + ". " + text;
-      }
-      line.textContent = text;
-      line.hidden = false;
-    }
+    var shown = 0;
+    function render() { stat("elapsed").textContent = duration((Date.now() - started) / 1000); }
     render();
     setInterval(render, 1000);
-    if (!source || !window.fetch) return;
+    if (!tracked) return;
     var url = source.getAttribute("data-progress-url") + "?after=" + encodeURIComponent(source.getAttribute("data-progress-after") || "0");
     setInterval(function () {
       fetch(url, { credentials: "same-origin", headers: { "Accept": "application/json" } })
         .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (data) { if (data) { done = data.calls; render(); } })
+        .then(function (data) {
+          if (!data || !data.calls) return;
+          var calls = data.calls;
+          for (; shown < calls.length; shown += 1) {
+            var call = calls[shown];
+            pushFeed(feed, stepLabel(call.step) + (call.ok ? "" : " (failed)"), (Date.now() - started) / 1000, !call.ok);
+          }
+          stat("steps").textContent = calls.length;
+          if (calls.length) stat("last").textContent = stepLabel(calls[calls.length - 1].step);
+        })
         .catch(function () { /* a missed poll is harmless; the next one catches up */ });
     }, 4000);
   }
@@ -293,12 +397,17 @@
     var makeLoader = inlineLoader(make);
     var busyLabel = make.getAttribute("data-busy-label") || "Making images";
     var doneWord = make.getAttribute("data-done-word") || "made";
+    // In the reviewer check the mark that matters is disagreement with the founder.
+    var badResult = new RegExp(make.getAttribute("data-bad-result") || "failed|could not");
     var fill = document.getElementById("make-fill");
     var status = document.getElementById("make-status");
+    var makeBar = make.querySelector("[role=progressbar]");
     var show = function (p) {
       var finished = p.done + p.failed;
       fill.style.width = (p.total ? Math.round(finished / p.total * 100) : 0) + "%";
+      if (makeBar) makeBar.setAttribute("aria-valuenow", finished);
       status.textContent = p.done + " " + doneWord + ", " + p.failed + " failed, " + p.waiting + " waiting.";
+      makeLoader.update(finished, p.total);
     };
     var step = function () {
       fetch(make.getAttribute("data-url"), {
@@ -309,6 +418,7 @@
         return response.json().then(function (body) { return { ok: response.ok, body: body }; });
       }).then(function (result) {
         if (result.body.progress) show(result.body.progress);
+        if (result.body.did) makeLoader.note(result.body.did, badResult.test(result.body.did));
         if (!result.ok) {
           status.textContent = result.body.error || "Generation stopped.";
           makeLoader.stop();
@@ -370,9 +480,13 @@
     var stopped = false;
     var stopMessage = "";
     var visualLoader = inlineLoader(visualMake);
+    var vBar = visualMake.querySelector("[role=progressbar]");
     var showVisual = function (p) {
       if (!p) return;
       vFill.style.width = (p.shots ? Math.round(p.resolved / p.shots * 100) : 0) + "%";
+      if (vBar) vBar.setAttribute("aria-valuenow", p.resolved);
+      visualLoader.update(p.resolved, p.shots);
+      visualLoader.set("spent", "$" + p.spent);
       vStatus.textContent = p.resolved + " of " + p.shots + " shots finished, " + p.made + " images made, " +
         p.ready + " piece" + (p.ready === 1 ? "" : "s") + " awaiting your decision. Spent $" + p.spent + " of $" + p.limit + ".";
     };
@@ -409,6 +523,7 @@
         }
         if (body.state === "worked") {
           vLast.textContent = body.did;
+          visualLoader.note(body.did, /failed|did not pass|gave up/i.test(body.did));
           work();
         } else if (body.state === "waiting") {
           if (body.did) vLast.textContent = body.did;
