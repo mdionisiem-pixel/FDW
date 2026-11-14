@@ -996,6 +996,7 @@ class BriefTest(models.Model):
 
     class Status(models.TextChoices):
         READY = "ready", "Ready to run"
+        RUNNING = "running", "Running"
         DONE = "done", "Run, awaiting your judgement"
         JUDGED = "judged", "Judged"
         FAILED = "failed", "Failed"
@@ -1014,6 +1015,9 @@ class BriefTest(models.Model):
     judgement = models.JSONField(default=dict, blank=True)
     notes = models.TextField(blank=True)
     error = models.TextField(blank=True)
+    # When the current run started. Only the request that set it may write the result,
+    # so a late, stuck request cannot overwrite a run that finished after it.
+    started_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

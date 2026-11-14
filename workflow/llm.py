@@ -90,6 +90,12 @@ class AnthropicClient:
                     message = stream.get_final_message()
             except self._anthropic.APIError as exc:
                 raise StageError(f"The model call for '{step}' failed: {exc}") from exc
+            except Exception as exc:
+                # A read timeout mid-stream can surface as a raw transport or socket error
+                # instead of an APIError. Turn it into a StageError so it is logged as a
+                # failed call like any other, rather than leaving no trace.
+                raise StageError(
+                    f"The model call for '{step}' failed: {exc or type(exc).__name__}") from exc
             self._collect(message, result)
             if message.stop_reason == "pause_turn":
                 # A long search turn was paused. Send the assistant turn back

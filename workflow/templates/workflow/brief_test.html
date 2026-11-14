@@ -35,10 +35,26 @@
     <div class="stage" id="result">
       <h2>Test of {{ test.created_at|date:"j M Y, H:i" }} <span class="meta">on {{ test.source_cycle.name }}</span></h2>
 
-      {% if test.status == "failed" %}
+      {% if test.status == "running" and not can_finish %}
+        <aside class="callout">
+          <p><strong>Running since {{ test.started_at|date:"H:i" }}.</strong> Both runs usually take 15 to 25 minutes. Reload this page to see when they are done; starting it again is not possible while it runs.</p>
+        </aside>
+      {% endif %}
+
+      {% if test.status == "ready" and not can_finish %}
+        <aside class="callout">
+          <p><strong>This test never started.</strong> Nothing was run and nothing was spent. Discard it below and run a new one.</p>
+        </aside>
+      {% endif %}
+
+      {% if can_finish %}
         <aside class="callout callout-stack">
-          <p><strong>A run did not finish.</strong> {{ test.error|truncatechars:400 }}</p>
-          <p>Fix the cause, then finish the test. Every step that already succeeded is reused at no cost, so you pay only for what never finished. So far this test has cost ${{ test.cost_usd|floatformat:2 }}.</p>
+          {% if test.status == "failed" %}
+            <p><strong>A run did not finish.</strong> {{ test.error|truncatechars:400 }}</p>
+          {% else %}
+            <p><strong>This test stopped part-way.</strong> It {% if test.status == "running" %}has been running for over {{ stale_minutes }} minutes{% else %}was started but never finished{% endif %}, which usually means the server restarted or the computer slept.</p>
+          {% endif %}
+          <p>{% if test.status == "failed" %}Fix the cause, then finish the test. {% endif %}Every step that already succeeded is reused at no cost, so you pay only for what never finished. So far this test has cost ${{ test.cost_usd|floatformat:2 }}.</p>
           <form method="post" action="{% url 'bakeoff_brief_test_finish' test.pk %}" data-working="Finishing the test, reusing the work already done" data-loader="machine" data-quips="design">
             {% csrf_token %}<button class="btn btn-primary" type="submit">Finish the test</button>
           </form>

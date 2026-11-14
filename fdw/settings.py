@@ -242,6 +242,9 @@ FDW_ANALYST_PRIVATE = os.environ.get("FDW_ANALYST_PRIVATE", "1").strip().lower()
 # use half. Stage 2 cost $2.20 to $2.75 per run in the first test, with
 # revisions writing long specifications, so each half leaves room for that.
 FDW_BRIEF_TEST_LIMIT_USD = Decimal(os.environ.get("FDW_BRIEF_TEST_LIMIT_USD", "12"))
+# A run longer than this has almost certainly stopped (a server restart, a sleeping computer),
+# so the page offers to finish it. A full stage 2 run usually takes 15 to 25 minutes.
+FDW_BRIEF_TEST_STALE_MINUTES = int(os.environ.get("FDW_BRIEF_TEST_STALE_MINUTES", "45"))
 # Hard stop for option suggestions on open points in the brief, per day, in US dollars.
 FDW_OPTIONS_DAILY_LIMIT_USD = Decimal(os.environ.get("FDW_OPTIONS_DAILY_LIMIT_USD", "1"))
 # Hard stop per interview, in US dollars. A full interview is expected to cost

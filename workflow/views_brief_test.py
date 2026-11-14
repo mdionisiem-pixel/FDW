@@ -24,6 +24,8 @@ def page(request, pk=None):
         "questions": brief_test.QUESTIONS,
         "answers": brief_test.ANSWERS,
         "dry_run": settings.FDW_DRY_RUN,
+        "can_finish": bool(test) and brief_test.can_finish(test),
+        "stale_minutes": settings.FDW_BRIEF_TEST_STALE_MINUTES,
     }
     if test and test.status in (BriefTest.Status.DONE, BriefTest.Status.JUDGED, BriefTest.Status.FAILED):
         context["sets"] = brief_test.sets(test)
