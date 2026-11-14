@@ -142,6 +142,9 @@ def current_interview():
 def conversation_text(interview: BrandInterview) -> str:
     lines = []
     for turn in interview.turns.all():
+        if turn.role == InterviewTurn.Role.ANALYST and not turn.text:
+            lines.append("Analyst: (said the picture is complete and offered to write the draft)")
+            continue
         speaker = "Analyst" if turn.role == InterviewTurn.Role.ANALYST else "Founder"
         lines.append(f"{speaker}: {turn.text}")
     return "\n".join(lines) or "(The interview has not started yet.)"
@@ -294,6 +297,8 @@ def draft(interview: BrandInterview, client=None) -> dict:
                             conversation=conversation_text(interview))
     result, _ = _call(interview, client or get_client(), "draft", prompt, settings.FDW_ANALYST_DRAFT_TOKENS,
                       settings.FDW_ANALYST_DRAFT_EFFORT, schemas.validate_brand_draft)
+    answers = "\n".join(interview.turns.filter(role=InterviewTurn.Role.FOUNDER).values_list("text", flat=True))
+    result = check_draft(result, interview.starting_brief, answers)
     interview.draft = result
     interview.status = BrandInterview.Status.DRAFTED
     interview.error = ""
@@ -301,32 +306,83 @@ def draft(interview: BrandInterview, client=None) -> dict:
     return result
 
 
-GOAL_LINE = re.compile(r"^(?P<goal>.*?)\s*\((?P<extra>[^()]*)\)\s*$")
+def goals_from_form(data) -> list:
+    """Goals from the page's goal rows: separate goal, measure and by-when fields per horizon.
 
-
-def parse_goals(text: str, horizon: str = SHORT) -> list:
-    """One goal per line, as shown on the page: 'Goal (measure; by when)'."""
+    Rows whose goal is empty are dropped, so clearing a goal removes it."""
     goals = []
-    for raw in (text or "").splitlines():
-        line = raw.strip().lstrip("-•* ").strip()
-        if not line:
-            continue
-        match = GOAL_LINE.match(line)
-        if match:
-            parts = [p.strip() for p in match.group("extra").split(";")]
-            goals.append({"goal": match.group("goal").strip(), "measure": parts[0],
-                          "by_when": "; ".join(parts[1:]).strip(), "horizon": horizon})
-        else:
-            goals.append({"goal": line, "measure": "", "by_when": "", "horizon": horizon})
+    for horizon in (SHORT, LONG):
+        names, measures, dates = (data.getlist(f"{horizon}_{k}") for k in ("goal", "measure", "by"))
+        for i, name in enumerate(names):
+            name = name.strip()
+            if not name:
+                continue
+            goals.append({
+                "goal": name[:300],
+                "measure": (measures[i] if i < len(measures) else "").strip()[:200],
+                "by_when": (dates[i] if i < len(dates) else "").strip()[:100],
+                "horizon": horizon,
+            })
     return goals
 
 
-def parse_both_goals(short_text: str, long_text: str) -> list:
-    return parse_goals(short_text, SHORT) + parse_goals(long_text, LONG)
+def _closing_group(text: str):
+    """The bracketed group that ends ``text``, allowing brackets inside it: (start, inner) or None."""
+    text = text.rstrip()
+    if not text.endswith(")"):
+        return None
+    depth = 0
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] == ")":
+            depth += 1
+        elif text[i] == "(":
+            depth -= 1
+            if depth == 0:
+                return i, text[i + 1:-1]
+    return None
 
 
-def approve(interview: BrandInterview, vision: str, mission: str, short_goals: str, long_goals: str,
-            brief_text: str) -> BrandBrief:
+def _top_level_split(text: str, sep: str = ";") -> list:
+    parts, depth, current = [], 0, ""
+    for ch in text:
+        depth += ch == "("
+        depth -= ch == ")"
+        if ch == sep and depth == 0:
+            parts.append(current.strip())
+            current = ""
+        else:
+            current += ch
+        depth = max(depth, 0)
+    parts.append(current.strip())
+    return parts
+
+
+def repair_goal(goal: dict) -> dict:
+    """Undo the old text format's parsing mistakes in a saved goal.
+
+    Goals were once edited as 'goal (measure; by when)' lines. A date with its
+    own brackets, such as 'December (year not stated)', left the whole line in
+    the goal; a measure containing ';' split in the wrong place. The last part
+    after a top-level ';' is the date, everything before it the measure."""
+    goal = dict(goal)
+    name, measure, by_when = goal.get("goal", ""), goal.get("measure", ""), goal.get("by_when", "")
+    if not measure and not by_when:
+        group = _closing_group(name)
+        if group:
+            start, inner = group
+            parts = _top_level_split(inner)
+            name = name[:start].strip()
+            measure = "; ".join(parts[:-1]) if len(parts) > 1 else parts[0]
+            by_when = parts[-1] if len(parts) > 1 else ""
+    elif ";" in by_when:
+        parts = _top_level_split(by_when)
+        measure = "; ".join([measure] + parts[:-1]) if measure else "; ".join(parts[:-1])
+        by_when = parts[-1]
+    goal.update(goal=name, measure=measure, by_when=by_when)
+    return goal
+
+
+def approve(interview: BrandInterview, vision: str, mission: str, goals: list, brief_text: str) -> BrandBrief:
     """Make the founder's edited draft the brand brief that every prompt uses."""
     if interview.status != BrandInterview.Status.DRAFTED:
         raise AnalystError("There is no draft to approve yet.")
@@ -337,7 +393,7 @@ def approve(interview: BrandInterview, vision: str, mission: str, short_goals: s
         brief.snapshot(BrandBriefVersion.Source.BEFORE, "Before the analyst interview was approved")
         brief.vision = vision.strip()
         brief.mission = mission.strip()
-        brief.goals = parse_both_goals(short_goals, long_goals)
+        brief.goals = goals
         brief.text = brief_text.strip()
         brief.save()
         brief.snapshot(BrandBriefVersion.Source.INTERVIEW, f"Approved from the interview of {interview.created_at:%d %b %Y}")
@@ -349,3 +405,91 @@ def approve(interview: BrandInterview, vision: str, mission: str, short_goals: s
 def close(interview: BrandInterview) -> None:
     interview.status = BrandInterview.Status.CLOSED
     interview.save(update_fields=["status", "updated_at"])
+
+
+# --- Checks on the draft, in code ------------------------------------------------
+# The draft prompt asks for these; code makes sure, because the brief reaches every
+# prompt and the rules below protect buyers from false claims.
+
+PROTECTED_LINES = (
+    "- Atelier: made by hand by Malina. May be described as handmade.",
+    '- Studio: designed by Malina, made by a named type of supplier (for example "machine-knitted in a '
+    'partner workshop"). Never described as handmade.',
+    "- Never claim a piece is handmade unless its tier is Atelier.",
+    "- Never state a fibre, origin, certification or sustainability claim that is not in the piece specification.",
+    '- Every image or 3D view of a piece that does not physically exist yet is labelled "Concept render. '
+    'The finished piece may differ slightly."',
+)
+RULE_HEADINGS = re.compile(r"^(hard rules|rules)\s*:?\s*$", re.I)
+NUMBER = re.compile(r"(?<![\w#])[€$£]?\d[\d,.]*\s?(?:%|k\b|m\b)?", re.I)
+VISION_WORDS, MISSION_WORDS = 25, 45
+
+
+def _norm(line: str) -> str:
+    return " ".join(line.split()).strip().lower()
+
+
+def protected_rules(brief_text: str) -> list:
+    """The rule lines in ``brief_text`` that must survive: the known buyer-protection
+    lines, and every line under a 'Hard rules' or 'Rules' heading."""
+    lines = [l.strip() for l in brief_text.splitlines()]
+    known = {_norm(p) for p in PROTECTED_LINES}
+    found, under_rules = [], False
+    for line in lines:
+        if not line:
+            under_rules = False if not under_rules else under_rules
+            continue
+        if RULE_HEADINGS.match(line):
+            under_rules = True
+            continue
+        if under_rules and not line.startswith("-"):
+            under_rules = False
+        if _norm(line) in known or (under_rules and line.startswith("-")):
+            if line not in found:
+                found.append(line)
+    return found
+
+
+def _numbers(text: str) -> set:
+    out = set()
+    for raw in NUMBER.findall(text or ""):
+        value = raw.strip().lower().replace(",", "").replace(" ", "").rstrip(".")
+        value = value.lstrip("€$£")
+        if value.endswith("k"):
+            try:
+                value = str(int(float(value[:-1]) * 1000))
+            except ValueError:
+                pass
+        value = value.rstrip("%")
+        if value and len(value.replace(".", "")) >= 2:
+            out.add(value)
+    return out
+
+
+def check_draft(draft: dict, starting_brief: str, founder_answers: str) -> dict:
+    """Restore missing protected rules and flag what the founder should look at.
+
+    Returns the draft with its brief possibly extended and a ``checks`` list of
+    {"kind", "text"} the review page shows above the draft."""
+    checks = []
+    brief = draft["brief"]
+    present = {_norm(l) for l in brief.splitlines()}
+    missing = [r for r in protected_rules(starting_brief) if _norm(r) not in present]
+    if missing:
+        brief = brief.rstrip() + "\n\nRULES (restored from the current brief)\n" + "\n".join(missing)
+        for rule in missing:
+            checks.append({"kind": "restored", "text": f"Restored a rule the draft left out: {rule} "
+                                                       "Delete it below only if you meant to change it."})
+    allowed = _numbers(starting_brief) | _numbers(founder_answers)
+    draft_text = " ".join([draft["vision"], draft["mission"], brief] +
+                          [f"{g['goal']} {g['measure']} {g['by_when']}" for g in draft["goals"]])
+    unsourced = sorted(_numbers(draft_text) - allowed)
+    if unsourced:
+        checks.append({"kind": "number", "text": "These figures are not in your answers or the current brief, so "
+                       "the analyst may have invented them: " + ", ".join(unsourced) + ". Check each one."})
+    for field, limit in (("vision", VISION_WORDS), ("mission", MISSION_WORDS)):
+        words = len(draft[field].split())
+        if words > limit:
+            checks.append({"kind": "length", "text": f"The {field} is {words} words; aim for {limit} or fewer, "
+                           "so it stays sharp in every prompt."})
+    return dict(draft, brief=brief, checks=checks)

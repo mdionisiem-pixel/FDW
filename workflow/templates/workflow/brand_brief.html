@@ -58,10 +58,8 @@
       <textarea id="brief-vision" name="vision" rows="2">{{ brief.vision }}</textarea>
       <label for="brief-mission">Mission</label>
       <textarea id="brief-mission" name="mission" rows="3">{{ brief.mission }}</textarea>
-      <label for="brief-short-goals">Short-term goals, the next 12 months. One per line: goal (measure; by when)</label>
-      <textarea id="brief-short-goals" name="short_goals" rows="4">{{ brief.short_goals_text }}</textarea>
-      <label for="brief-long-goals">Long-term goals, 3 to 5 years. One per line: goal (measure; by when)</label>
-      <textarea id="brief-long-goals" name="long_goals" rows="4">{{ brief.long_goals_text }}</textarea>
+      {% include "workflow/includes/goal_rows.html" with horizon="short" title="Short-term goals" span="the next 12 months" goals=brief.short_goals %}
+      {% include "workflow/includes/goal_rows.html" with horizon="long" title="Long-term goals" span="3 to 5 years" goals=brief.long_goals %}
       <label for="brief-text">Brand brief</label>
       <textarea id="brief-text" name="text" rows="30" spellcheck="true">{{ brief.text }}</textarea>
       <div class="form-foot">

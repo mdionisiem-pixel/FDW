@@ -459,6 +459,19 @@
     });
   }
 
+  // Goal rows: "Add another goal" copies an empty row.
+  document.querySelectorAll("[data-goal-rows]").forEach(function (set) {
+    var add = set.querySelector("[data-add-goal]");
+    if (!add) return;
+    add.addEventListener("click", function () {
+      var rows = set.querySelectorAll(".goal-row:not(.goal-row-head)");
+      var copy = rows[rows.length - 1].cloneNode(true);
+      copy.querySelectorAll("input").forEach(function (input) { input.value = ""; });
+      add.parentNode.insertBefore(copy, add);
+      copy.querySelector("input").focus();
+    });
+  });
+
   // Brand interview: send an answer, show the analyst thinking, then load the next question.
   var answerForm = document.getElementById("answer-form");
   if (answerForm) {

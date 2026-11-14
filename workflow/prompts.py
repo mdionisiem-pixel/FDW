@@ -745,6 +745,7 @@ How to interview
 - Offer two to four short example answers the founder can tap and edit. Base them on what is known about Malina, make them genuinely different from each other (include one that pushes in a different direction), and keep each under 20 words. They are prompts for thinking, not the answer you want.
 - If the founder says they do not know or wants to skip, accept it, and move to the next area; the draft will mark the gap as to be confirmed.
 - Aim for a complete picture in about 12 to 18 questions. Set ready_to_draft to true when every area is at least 2, or when the founder says they want the draft now.
+- When ready_to_draft is true and nothing essential is left to ask, leave question, area and examples empty and say in reflection that the picture is complete; do not invent a question to fill the turn. If something important is still open, ask it, and ready_to_draft can still be true.
 
 Coverage scale for each area: 0 nothing known, 1 thin or vague, 2 clear enough to write, 3 sharp and specific.
 

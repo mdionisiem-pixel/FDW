@@ -1,6 +1,13 @@
 {# The analyst's draft, editable, with what changed and what still needs the founder. #}
 <p class="lede">Edit anything here, then approve it. Once approved it goes into every prompt; the current version is kept and can be restored.</p>
 
+{% if draft.checks %}
+  <aside class="callout callout-stack draft-checks" aria-label="Checked by the app">
+    <p><strong>Checked by the app</strong></p>
+    <ul>{% for c in draft.checks %}<li class="check-{{ c.kind }}">{{ c.text }}</li>{% endfor %}</ul>
+  </aside>
+{% endif %}
+
 {% if draft.to_confirm %}
   <aside class="callout callout-stack">
     <p><strong>{{ draft.to_confirm|length }} point{{ draft.to_confirm|pluralize }} for you to settle</strong></p>
@@ -15,10 +22,8 @@
   <textarea id="draft-vision" name="vision" rows="2">{{ draft.vision }}</textarea>
   <label for="draft-mission">Mission</label>
   <textarea id="draft-mission" name="mission" rows="3">{{ draft.mission }}</textarea>
-  <label for="draft-short-goals">Short-term goals, the next 12 months. One per line: goal (measure; by when)</label>
-  <textarea id="draft-short-goals" name="short_goals" rows="4">{{ draft_short_goals }}</textarea>
-  <label for="draft-long-goals">Long-term goals, 3 to 5 years. One per line: goal (measure; by when)</label>
-  <textarea id="draft-long-goals" name="long_goals" rows="4">{{ draft_long_goals }}</textarea>
+  {% include "workflow/includes/goal_rows.html" with horizon="short" title="Short-term goals" span="the next 12 months" goals=draft_short_goals %}
+  {% include "workflow/includes/goal_rows.html" with horizon="long" title="Long-term goals" span="3 to 5 years" goals=draft_long_goals %}
   <label for="draft-text">Brand brief</label>
   <textarea id="draft-text" name="text" rows="24" spellcheck="true">{{ draft.brief }}</textarea>
   <div class="form-foot">
@@ -27,9 +32,19 @@
   </div>
 </form>
 
+<details class="fold" open>
+  <summary>Line by line against the current brief: {{ added_count }} added, {{ removed_count }} removed</summary>
+  <p class="meta">Exactly what every prompt would receive differently, worked out by the app. Your edits above are not included until you approve.</p>
+  {% if line_changes %}
+    <ol class="line-changes">
+      {% for r in line_changes %}<li class="lc lc-{{ r.kind }}">{% if r.kind == "gap" %}…{% else %}<span class="lc-mark" aria-hidden="true">{% if r.kind == "added" %}+{% elif r.kind == "removed" %}−{% endif %}</span><span class="visually-hidden">{% if r.kind == "added" %}Added: {% elif r.kind == "removed" %}Removed: {% endif %}</span>{{ r.text }}{% endif %}</li>{% endfor %}
+    </ol>
+  {% else %}<p>No differences.</p>{% endif %}
+</details>
+
 {% if draft.changes %}
-  <details class="fold" open>
-    <summary>What changed from the current brief</summary>
+  <details class="fold">
+    <summary>The analyst's own summary of what changed</summary>
     <ul>{% for c in draft.changes %}<li>{{ c }}</li>{% endfor %}</ul>
   </details>
 {% endif %}

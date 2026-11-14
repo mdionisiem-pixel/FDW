@@ -132,9 +132,12 @@ class InterviewFlowTests(TestCase):
         self.assertEqual(draft["goals"][0]["measure"], "40 pieces")
 
         old_text = BrandBrief.current().text
-        analyst.approve(interview, draft["vision"], draft["mission"],
-                        "Sell out the winter pre-order (40 pieces; March 2027)\nGrow the waiting list",
-                        "Run a two-person atelier (two makers; 2030)", draft["brief"])
+        goals = [
+            {"goal": "Sell out the winter pre-order", "measure": "40 pieces", "by_when": "March 2027", "horizon": "short"},
+            {"goal": "Grow the waiting list", "measure": "", "by_when": "", "horizon": "short"},
+            {"goal": "Run a two-person atelier", "measure": "two makers", "by_when": "2030", "horizon": "long"},
+        ]
+        analyst.approve(interview, draft["vision"], draft["mission"], goals, draft["brief"])
         brief = BrandBrief.current()
         self.assertEqual(brief.vision, "Every wardrobe holds one piece made to be handed on.")
         self.assertEqual(brief.goals, [
@@ -169,17 +172,59 @@ class DryRunInterviewTests(TestCase):
         self.assertEqual(interview.status, BrandInterview.Status.DRAFTED)
 
 
-class GoalParsingTests(TestCase):
-    def test_lines_become_goals_with_measure_date_and_horizon(self):
-        self.assertEqual(analyst.parse_goals("- Sell 40 coats (40 pieces; March 2027)\n\n• Open a studio (2028)\nPlain goal", "long"), [
-            {"goal": "Sell 40 coats", "measure": "40 pieces", "by_when": "March 2027", "horizon": "long"},
-            {"goal": "Open a studio", "measure": "2028", "by_when": "", "horizon": "long"},
-            {"goal": "Plain goal", "measure": "", "by_when": "", "horizon": "long"},
+class GoalFieldTests(TestCase):
+    def form(self, **fields):
+        from django.http import QueryDict
+        data = QueryDict(mutable=True)
+        for key, values in fields.items():
+            data.setlist(key, values)
+        return data
+
+    def test_rows_become_goals_and_empty_rows_are_dropped(self):
+        goals = analyst.goals_from_form(self.form(
+            short_goal=["Sell 40 coats", "", "Grow the list"], short_measure=["40 pieces", "x", ""],
+            short_by=["December (year not stated)", "", "2027"],
+            long_goal=["Open a studio"], long_measure=["two makers; one shop"], long_by=["2030"]))
+        self.assertEqual(goals, [
+            {"goal": "Sell 40 coats", "measure": "40 pieces", "by_when": "December (year not stated)", "horizon": "short"},
+            {"goal": "Grow the list", "measure": "", "by_when": "2027", "horizon": "short"},
+            {"goal": "Open a studio", "measure": "two makers; one shop", "by_when": "2030", "horizon": "long"},
         ])
 
-    def test_both_horizons_are_kept_apart(self):
-        goals = analyst.parse_both_goals("Sell 40 coats", "Open a studio (2030)")
-        self.assertEqual([(g["goal"], g["horizon"]) for g in goals], [("Sell 40 coats", "short"), ("Open a studio", "long")])
+
+class GoalRepairTests(TestCase):
+    """The goals saved from the first live interview, as they were stored."""
+
+    def test_a_whole_line_left_in_the_goal_is_split_even_with_brackets_in_the_date(self):
+        fixed = analyst.repair_goal({"goal": "Build the waiting list to 500 people (500-person waiting list; "
+                                             "December (year not stated by founder))", "measure": "", "by_when": "",
+                                     "horizon": "short"})
+        self.assertEqual((fixed["goal"], fixed["measure"], fixed["by_when"]),
+                         ("Build the waiting list to 500 people", "500-person waiting list",
+                          "December (year not stated by founder)"))
+
+    def test_a_measure_with_semicolons_moves_back_from_the_date(self):
+        fixed = analyst.repair_goal({"goal": "Scale revenue while staying a two-person operation", "measure": "€250k revenue",
+                                     "by_when": "founder plus one atelier assistant; direct online sales only; 2028",
+                                     "horizon": "long"})
+        self.assertEqual((fixed["measure"], fixed["by_when"]),
+                         ("€250k revenue; founder plus one atelier assistant; direct online sales only", "2028"))
+        self.assertEqual(fixed["horizon"], "long")
+
+    def test_a_good_goal_is_left_alone(self):
+        goal = {"goal": "Sell 40 coats", "measure": "40 pieces", "by_when": "March 2027", "horizon": "short"}
+        self.assertEqual(analyst.repair_goal(goal), goal)
+
+    def test_the_migration_repairs_the_brief(self):
+        import importlib
+        from django.apps import apps
+        brief = BrandBrief.current()
+        brief.goals = [{"goal": "Reach €50k revenue (€50k; December (year not stated))", "measure": "", "by_when": "",
+                        "horizon": "short"}]
+        brief.save()
+        importlib.import_module("workflow.migrations.0015_repair_goals").repair(apps, None)
+        brief.refresh_from_db()
+        self.assertEqual(brief.goals[0]["by_when"], "December (year not stated)")
 
 
 class PromptTextTests(TestCase):
@@ -310,11 +355,13 @@ class PageTests(TestCase):
         self.client.post(reverse("brand_interview_draft", args=[interview.pk]))
         page = self.client.get(reverse("brand_interview"))
         self.assertContains(page, "Approve and use in every prompt")
-        self.assertContains(page, "Sell out the winter pre-order (40 pieces; March 2027)")
-        self.assertContains(page, "Run Malina as a two-person atelier (two makers; 2030)")
+        self.assertContains(page, 'value="Sell out the winter pre-order"')
+        self.assertContains(page, 'value="Run Malina as a two-person atelier"')
+        self.assertContains(page, "Line by line against the current brief")
         self.client.post(reverse("brand_interview_approve", args=[interview.pk]), {
-            "vision": "Edited vision.", "mission": "Edited mission.", "short_goals": "Goal one (10; 2027)",
-            "long_goals": "Goal two (studio; 2030)", "text": "Edited brief.",
+            "vision": "Edited vision.", "mission": "Edited mission.", "short_goal": ["Goal one", ""],
+            "short_measure": ["10", ""], "short_by": ["2027", ""], "long_goal": ["Goal two"],
+            "long_measure": ["studio"], "long_by": ["2030"], "text": "Edited brief.",
         })
         brief = BrandBrief.current()
         self.assertEqual((brief.vision, brief.text), ("Edited vision.", "Edited brief."))
@@ -326,8 +373,9 @@ class PageTests(TestCase):
 
     def test_editing_by_hand_saves_all_four_parts_and_can_be_restored(self):
         original = BrandBrief.current().text
-        self.client.post(reverse("brand_brief"), {"vision": "V", "mission": "M", "short_goals": "G (1; 2027)",
-                                                   "long_goals": "L (2; 2030)", "text": "New text"})
+        self.client.post(reverse("brand_brief"), {"vision": "V", "mission": "M", "short_goal": ["G"],
+                                                   "short_measure": ["1"], "short_by": ["2027"], "long_goal": ["L"],
+                                                   "long_measure": ["2"], "long_by": ["2030"], "text": "New text"})
         brief = BrandBrief.current()
         self.assertEqual((brief.vision, brief.mission, brief.text), ("V", "M", "New text"))
         self.assertEqual([g["horizon"] for g in brief.goals], ["short", "long"])
@@ -420,3 +468,103 @@ class GoalHorizonDraftTests(TestCase):
         self.assertIn("short_goals", prompts.BRAND_AREAS)
         self.assertIn("long_goals", prompts.BRAND_AREAS)
         self.assertIn("Long-term goals: where the brand should stand in three to five years", prompts.BRAND_ANALYST)
+
+
+@override_settings(FDW_DRY_RUN=False, FDW_INTERVIEW_LIMIT_USD=Decimal("2"))
+class ReadyToDraftTests(TestCase):
+    """In the first live interview the analyst said 'ready' with no question three
+    times; the app forced it to invent one. Now 'ready' is a proper ending."""
+
+    READY = json.dumps({"reflection": "Every area is covered.", "question": "", "why": "Enough to write the brief.",
+                        "area": "", "examples": [], "coverage": {}, "ready_to_draft": True})
+
+    def test_ready_with_no_question_is_accepted_without_a_retry(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        client = ScriptedAnalyst(self.READY)
+        turn = analyst.answer(interview, "That's everything.", client)
+        self.assertEqual((turn.text, turn.area, turn.examples), ("", "", []))
+        self.assertEqual(len(client.calls), 1)
+        interview.refresh_from_db()
+        self.assertTrue(interview.coverage["ready"])
+        self.assertIn("(said the picture is complete", analyst.conversation_text(interview))
+
+    def test_no_question_without_ready_is_still_sent_back(self):
+        from . import schemas
+        with self.assertRaises(schemas.SchemaError):
+            schemas.validate_analyst_turn({"question": "", "ready_to_draft": False}, prompts.BRAND_AREAS)
+
+    def test_the_founder_can_still_add_more_after_ready(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        analyst.answer(interview, "Done.", ScriptedAnalyst(self.READY))
+        turn = analyst.answer(interview, "One more thing: no leather.", ScriptedAnalyst(turn_json("Why no leather?", "boundaries")))
+        self.assertEqual(turn.text, "Why no leather?")
+
+    def test_the_page_offers_the_draft_instead_of_an_empty_question(self):
+        self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        analyst.answer(interview, "Done.", ScriptedAnalyst(self.READY))
+        page = self.client.get(reverse("brand_interview")).content.decode()
+        self.assertIn("The analyst has what it needs to write your draft.", page)
+        self.assertEqual(page.count("Write the draft now"), 1)
+
+
+class DraftCheckTests(TestCase):
+    def draft(self, **changes):
+        base = {"vision": "Craft that scales.", "mission": "Malina makes pieces.",
+                "goals": [{"goal": "Sell coats", "measure": "40 pieces", "by_when": "March 2027", "horizon": "short"}],
+                "brief": "WHO BUYS\nWomen 25-35.", "changes": [], "to_confirm": []}
+        base.update(changes)
+        return base
+
+    def test_every_protected_rule_in_the_current_brief_is_restored_and_flagged(self):
+        from .models import DEFAULT_BRAND_BRIEF
+        result = analyst.check_draft(self.draft(), DEFAULT_BRAND_BRIEF, "40 pieces by March 2027, women 25-35")
+        for rule in analyst.PROTECTED_LINES:
+            self.assertIn(rule, result["brief"])
+        self.assertEqual(sum(1 for c in result["checks"] if c["kind"] == "restored"), 5)
+
+    def test_rules_already_kept_are_not_flagged(self):
+        from .models import DEFAULT_BRAND_BRIEF
+        brief = "WHO BUYS\nWomen 25-35.\n\nRULES\n" + "\n".join(analyst.PROTECTED_LINES)
+        result = analyst.check_draft(self.draft(brief=brief), DEFAULT_BRAND_BRIEF, "40 pieces by March 2027, women 25-35")
+        self.assertEqual(result["checks"], [])
+        self.assertEqual(result["brief"], brief)
+
+    def test_a_rule_the_founder_wrote_under_hard_rules_is_protected_too(self):
+        start = "Hard rules:\n- Never use leather.\n- Never use real fur."
+        result = analyst.check_draft(self.draft(), start, "40 pieces by March 2027, women 25-35")
+        self.assertIn("- Never use leather.", result["brief"])
+        self.assertIn("- Never use real fur.", result["brief"])
+
+    def test_figures_not_in_the_answers_or_brief_are_flagged(self):
+        result = analyst.check_draft(self.draft(vision="Reach €250k by 2030."), "", "40 pieces by March 2027, women 25-35")
+        flagged = [c["text"] for c in result["checks"] if c["kind"] == "number"]
+        self.assertEqual(len(flagged), 1)
+        self.assertIn("2030", flagged[0])
+        self.assertIn("250000", flagged[0])
+        self.assertNotIn("2027", flagged[0])
+
+    def test_long_statements_are_flagged(self):
+        result = analyst.check_draft(self.draft(vision=" ".join(["word"] * 30)), "", "40 pieces March 2027 25-35")
+        self.assertTrue(any(c["kind"] == "length" and "30 words" in c["text"] for c in result["checks"]))
+
+    @override_settings(FDW_DRY_RUN=False, FDW_INTERVIEW_LIMIT_USD=Decimal("2"))
+    def test_the_draft_step_stores_the_checks(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        analyst.answer(interview, "Clothes handed on.", ScriptedAnalyst(turn_json("Next?", "mission")))
+        result = analyst.draft(interview, ScriptedAnalyst(DRAFT))
+        interview.refresh_from_db()
+        self.assertEqual(interview.draft["checks"], result["checks"])
+        self.assertTrue(any(c["kind"] == "number" for c in result["checks"]))  # 40 pieces, 2027, 2030 were never said
+
+
+class LineChangeTests(TestCase):
+    def test_changes_are_worked_out_by_the_app(self):
+        from .views_brand import line_changes
+        rows = line_changes("A\nB\nC\nD\nE", "A\nB\nX\nD\nE")
+        self.assertEqual([(r["kind"], r["text"]) for r in rows],
+                         [("same", "B"), ("removed", "C"), ("added", "X"), ("same", "D")])
+
+    def test_identical_texts_have_no_changes(self):
+        from .views_brand import line_changes
+        self.assertEqual(line_changes("A\nB", "A\nB"), [])

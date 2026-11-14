@@ -23,7 +23,7 @@
             <li class="turn turn-{{ t.role }}">
               {% if t.role == "analyst" %}
                 {% if t.reflection %}<p class="turn-reflection">{{ t.reflection }}</p>{% endif %}
-                <p class="turn-text">{{ t.text }}</p>
+                {% if t.text %}<p class="turn-text">{{ t.text }}</p>{% else %}<p class="turn-text meta">Ready to write the draft.</p>{% endif %}
               {% else %}
                 <p class="turn-text">{{ t.text|linebreaksbr }}</p>
               {% endif %}
@@ -34,11 +34,22 @@
     {% endif %}
 
     {% if current %}
-      <div class="question-card" id="current">
-        <p class="meta question-area">{{ current_area_label }} · question {{ answered|add:1 }}</p>
-        {% if current.reflection %}<p class="turn-reflection">{{ current.reflection }}</p>{% endif %}
-        <h2 class="question-text">{{ current.text }}</h2>
-        {% if current.why %}<p class="meta">Why it matters: {{ current.why }}</p>{% endif %}
+      <div class="question-card{% if not current.text %} question-card-ready{% endif %}" id="current">
+        {% if current.text %}
+          <p class="meta question-area">{{ current_area_label }} · question {{ answered|add:1 }}</p>
+          {% if current.reflection %}<p class="turn-reflection">{{ current.reflection }}</p>{% endif %}
+          <h2 class="question-text">{{ current.text }}</h2>
+          {% if current.why %}<p class="meta">Why it matters: {{ current.why }}</p>{% endif %}
+        {% else %}
+          <p class="meta question-area">Interview complete</p>
+          {% if current.reflection %}<p class="turn-reflection">{{ current.reflection }}</p>{% endif %}
+          <h2 class="question-text">The analyst has what it needs to write your draft.</h2>
+          {% if current.why %}<p class="meta">{{ current.why }}</p>{% endif %}
+          <form method="post" action="{% url 'brand_interview_draft' interview.pk %}" data-working="The analyst is writing your vision, mission, goals and brief" data-loader="spool" data-quips="analyst">
+            {% csrf_token %}<button class="btn btn-primary" type="submit">Write the draft now</button>
+          </form>
+          <p class="meta ready-more">Or add anything else first; the analyst will follow up if it changes the picture.</p>
+        {% endif %}
 
         <form class="answer-form" id="answer-form" method="post" action="{% url 'brand_interview_answer' interview.pk %}" data-url="{% url 'brand_interview_answer' interview.pk %}" data-loader="hoop" data-quips="analyst">
           {% include "workflow/includes/thinking_card.html" with title="The analyst is thinking" %}
@@ -67,12 +78,14 @@
       </aside>
     {% endif %}
 
-    <div class="interview-actions{% if ready %} is-ready{% endif %}">
-      {% if ready %}<p><strong>The analyst has enough to write the draft.</strong> You can still answer more to sharpen it.</p>{% endif %}
-      <form method="post" action="{% url 'brand_interview_draft' interview.pk %}" data-working="The analyst is writing your vision, mission, goals and brief" data-loader="spool" data-quips="analyst">
-        {% csrf_token %}
-        <button class="btn{% if ready %} btn-primary{% endif %}" type="submit" {% if not answered %}disabled{% endif %}>Write the draft now</button>
-      </form>
+    <div class="interview-actions{% if ready and not finished %} is-ready{% endif %}">
+      {% if not finished %}
+        {% if ready %}<p><strong>The analyst has enough to write the draft.</strong> You can still answer more to sharpen it.</p>{% endif %}
+        <form method="post" action="{% url 'brand_interview_draft' interview.pk %}" data-working="The analyst is writing your vision, mission, goals and brief" data-loader="spool" data-quips="analyst">
+          {% csrf_token %}
+          <button class="btn{% if ready %} btn-primary{% endif %}" type="submit" {% if not answered %}disabled{% endif %}>Write the draft now</button>
+        </form>
+      {% endif %}
       <form method="post" action="{% url 'brand_interview_close' interview.pk %}">
         {% csrf_token %}<button class="btn btn-quiet" type="submit">End without changes</button>
       </form>

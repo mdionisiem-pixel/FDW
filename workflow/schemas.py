@@ -930,15 +930,21 @@ def validate_analyst_turn(data, areas):
     """One interview turn: a single question, its area, example answers and coverage.
 
     Coverage is clamped to 0-3 and missing areas keep 0, so a slightly sloppy
-    answer still moves the interview on; a missing question does not."""
+    answer still moves the interview on. A missing question is accepted only
+    when the analyst says it is ready to draft: then there is nothing left
+    worth asking, and forcing a question would make it invent one."""
     if not isinstance(data, dict):
         raise SchemaError(["Expected a JSON object for the turn."])
     problems = []
-    if not _is_text(data.get("question")):
-        problems.append("question must be a non-empty string")
+    ready = bool(data.get("ready_to_draft"))
+    asking = _is_text(data.get("question"))
+    if not asking and not ready:
+        problems.append("question must be a non-empty string unless ready_to_draft is true")
     area = str(data.get("area") or "").strip()
-    if area not in areas:
+    if asking and area not in areas:
         problems.append(f"area must be one of {sorted(areas)}")
+    if not asking:
+        area = ""
     if problems:
         raise SchemaError(problems)
     examples = [str(e).strip() for e in (data.get("examples") or []) if _is_text(e)][:4]
@@ -951,12 +957,12 @@ def validate_analyst_turn(data, areas):
             coverage[key] = 0
     return {
         "reflection": str(data.get("reflection") or "").strip(),
-        "question": data["question"].strip(),
+        "question": str(data.get("question") or "").strip(),
         "why": str(data.get("why") or "").strip(),
         "area": area,
-        "examples": examples,
+        "examples": examples if asking else [],
         "coverage": coverage,
-        "ready_to_draft": bool(data.get("ready_to_draft")),
+        "ready_to_draft": ready,
     }
 
 
