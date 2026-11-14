@@ -1,11 +1,16 @@
 from django.urls import path
 
-from . import views, views_bakeoff, views_brand
+from . import views, views_bakeoff, views_brand, views_brief_test
 
 urlpatterns = [
     path("bakeoff/", views_bakeoff.home, name="bakeoff_home"),
     path("bakeoff/pieces/new/", views_bakeoff.create_piece, name="bakeoff_create"),
     path("bakeoff/check-models/", views_bakeoff.check_models, name="bakeoff_check_models"),
+    path("bakeoff/brief-test/", views_brief_test.page, name="bakeoff_brief_test"),
+    path("bakeoff/brief-test/<int:pk>/", views_brief_test.page, name="bakeoff_brief_test_detail"),
+    path("bakeoff/brief-test/start/", views_brief_test.start, name="bakeoff_brief_test_start"),
+    path("bakeoff/brief-test/<int:pk>/judge/", views_brief_test.judge, name="bakeoff_brief_test_judge"),
+    path("bakeoff/brief-test/<int:pk>/discard/", views_brief_test.discard, name="bakeoff_brief_test_discard"),
     path("bakeoff/reviewer/", views_bakeoff.reviewer, name="bakeoff_reviewer"),
     path("bakeoff/reviewer/start/", views_bakeoff.reviewer_start, name="bakeoff_reviewer_start"),
     path("bakeoff/reviewer/mark/<int:attempt_pk>/", views_bakeoff.mark_attempt, name="bakeoff_mark_attempt"),

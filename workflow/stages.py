@@ -359,15 +359,17 @@ def design_issues(review) -> list:
     return issues
 
 
-def run_stage2(cycle: Cycle, client=None) -> list:
-    """Plan three collection concepts, specify each one, and review each one separately."""
+def run_stage2(cycle: Cycle, client=None, brand_brief: str = None) -> list:
+    """Plan three collection concepts, specify each one, and review each one separately.
+
+    ``brand_brief`` replaces the current brand brief; only the brief test uses it."""
     brief = cycle.approved_brief
     if cycle.status != Cycle.Status.BRIEF_APPROVED or brief is None:
         raise GateError(
             "Stage 2 needs an approved research brief. Approve the brief at gate 1 first."
         )
     client = client or get_client()
-    brand_brief = BrandBrief.current().prompt_text
+    brand_brief = brand_brief if brand_brief is not None else BrandBrief.current().prompt_text
 
     # Planning and specifying are separate calls. Three fully specified
     # collections do not fit in one answer, and a cut-off answer saves nothing.

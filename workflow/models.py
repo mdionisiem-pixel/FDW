@@ -274,6 +274,8 @@ class Cycle(models.Model):
     )
     season = models.CharField(max_length=16, choices=Season.choices, blank=True)
     season_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    # A hidden copy made by a brief test: it never appears among the founder's cycles.
+    is_test = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -982,3 +984,40 @@ class ReviewerResult(models.Model):
     @property
     def agrees(self):
         return None if not self.verdict else self.reviewer_accepts == self.founder_accepts
+
+
+class BriefTest(models.Model):
+    """Stage 2 run twice on copies of one cycle, once with an earlier brand brief (A) and once
+    with the current one (B), so the founder can judge blind whether the brief helps.
+
+    Everything else is held equal: the same approved research brief, direction and season."""
+
+    class Status(models.TextChoices):
+        READY = "ready", "Ready to run"
+        DONE = "done", "Run, awaiting your judgement"
+        JUDGED = "judged", "Judged"
+        FAILED = "failed", "Failed"
+
+    source_cycle = models.ForeignKey("Cycle", on_delete=models.CASCADE, related_name="brief_tests")
+    version_a = models.ForeignKey(BrandBriefVersion, on_delete=models.SET_NULL, null=True, blank=True)
+    label_a = models.CharField(max_length=200)
+    brief_a = models.TextField()
+    brief_b = models.TextField()
+    cycle_a = models.ForeignKey("Cycle", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    cycle_b = models.ForeignKey("Cycle", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    # Set 1 is shown first; it is A or B at random, hidden until the founder has judged.
+    first_is_a = models.BooleanField(default=True)
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.READY)
+    # {"question": "1" | "2" | "same"} as the founder answered, before the reveal.
+    judgement = models.JSONField(default=dict, blank=True)
+    notes = models.TextField(blank=True)
+    error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    @property
+    def cost_usd(self) -> Decimal:
+        cycles = [c for c in (self.cycle_a_id, self.cycle_b_id) if c]
+        return ModelCall.objects.filter(cycle_id__in=cycles).aggregate(total=Sum("cost_usd"))["total"] or Decimal("0")
