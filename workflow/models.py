@@ -627,6 +627,9 @@ class PieceVisuals(models.Model):
     criteria = models.JSONField(default=list, blank=True)
     # Copied from gate 3, so the images show the piece as it will be made.
     accepted_changes = models.JSONField(default=list, blank=True)
+    # Where the approved images depart from the specification's targets. The piece is
+    # made to the image, so these override the specification from approval onwards.
+    build_to_image = models.JSONField(default=list, blank=True)
     waitlist_only = models.BooleanField(default=False)
     founder_notes = models.TextField(blank=True)
     # The founder has approved shot A, so B to E may be made from it (FDW_FRONT_SHOT_GATE).

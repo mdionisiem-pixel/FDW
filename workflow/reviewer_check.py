@@ -116,8 +116,9 @@ def review_next(run: ReviewerRun, client=None):
         reference = _reference(image)
         spec = {"name": piece.name, "description": piece.spec.get("description", ""),
                 "founder_notes": piece.notes.strip() or "None."}
+        # A real, finished piece: judged as one, not as a concept.
         prompt = visuals.review_prompt(spec, [], piece.spec.get("checklist", []), image.shot,
-                                       [reference.shot] if reference else [])
+                                       [reference.shot] if reference else [], mode="real")
         sources = [image] + ([reference] if reference else [])
     images = []
     if not getattr(client, "dry_run", False):

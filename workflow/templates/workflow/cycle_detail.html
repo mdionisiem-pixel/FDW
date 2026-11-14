@@ -737,6 +737,9 @@
           </div>
           <p class="meta"><span class="piece-tier tier-{{ pv.piece.production_route }}">{{ pv.piece.tier }}</span> €{{ pv.piece.target_price_eur|floatformat:0 }}{% if pv.visuals.waitlist_only %} · <strong>Waitlist only</strong> until a supplier is confirmed{% endif %}</p>
           {% if pv.visuals.error %}<div class="issues issues-blocking"><h4>Writing the prompts stopped</h4><p>{{ pv.visuals.error }}</p></div>{% endif %}
+          {% if pv.visuals.build_to_image %}
+            <div class="issues build-to-image"><h4>Make it to the image</h4><p class="meta">The approved images depart from the specification here. Buyers will order what the images show, so these replace the specification's targets.</p><ul>{% for c in pv.visuals.build_to_image %}<li>{{ c }}</li>{% endfor %}</ul></div>
+          {% endif %}
           {% if pv.visuals.accepted_changes %}
             <div class="issues"><h4>Drawn with the changes you accepted at gate 3</h4><ul>{% for c in pv.visuals.accepted_changes %}<li>{{ c }}</li>{% endfor %}</ul></div>
           {% endif %}

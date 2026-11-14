@@ -764,6 +764,8 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .checklist { margin: 0.2rem 0; padding-left: 1.1rem; }
 .checklist .check-mismatch { color: var(--floss-deep); }
 .checklist .check-not_visible { color: var(--ink-soft); }
+.checklist .check-spec_update { color: var(--ochre); }
+.build-to-image { border-left: 3px solid var(--ochre); background: var(--ochre-wash); }
 @media (prefers-reduced-motion: reduce) { .shot-working .shot-empty { animation: none; } }
 
 /* Tools: image model test and reviewer check */
