@@ -2,7 +2,8 @@
 {% block title %}Image test results | Malina studio{% endblock %}
 {% block content %}
 <section class="page">
-  <p class="crumb"><a href="{% url 'bakeoff_home' %}">Image test</a></p>
+  {% include "workflow/includes/tools_tabs.html" %}
+  <p class="crumb"><a href="{% url 'bakeoff_home' %}">Image model test</a></p>
   <div class="page-head">
     <div>
       <h1>Image test results</h1>

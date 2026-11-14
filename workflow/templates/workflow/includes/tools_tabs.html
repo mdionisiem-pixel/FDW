@@ -1,0 +1,4 @@
+<nav class="tools-tabs" aria-label="Tools">
+  <a href="{% url 'bakeoff_home' %}" {% if request.resolver_match.url_name != 'bakeoff_reviewer' %}aria-current="page"{% endif %}>Image model test</a>
+  <a href="{% url 'bakeoff_reviewer' %}" {% if request.resolver_match.url_name == 'bakeoff_reviewer' %}aria-current="page"{% endif %}>Reviewer check</a>
+</nav>

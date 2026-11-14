@@ -85,6 +85,17 @@ reach. Spending stops at `FDW_BAKEOFF_LIMIT_USD` (default $10). Photos and gener
 images are stored in `media/`, which is not committed, and are shown only to signed-in
 users.
 
+## Reviewer check
+
+Tools → Reviewer check runs the stage 4 image reviewer, with the same instructions and
+model, on images you have scored in the image model test, and compares its verdicts with
+yours. An image counts as one you would accept when all four of your scores are at least
+`FDW_REVIEWER_ACCEPT_SCORE` (default 4). The reviewer can be relied on once it has seen at
+least `FDW_REVIEWER_MIN_REJECTED` (default 15) images you would reject and failed at least
+`FDW_REVIEWER_TARGET_CATCH` (default 90%) of them. Run it again whenever the reviewer's
+prompt or model changes; the page says when a check is out of date. It shares the image
+test's spending limit.
+
 ## Visual prototypes (stage 4)
 
 After gate 3, press **Set up visual prototypes**, then **Make images**. The page makes

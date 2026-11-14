@@ -6,7 +6,7 @@ from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
-from . import bakeoff
+from . import bakeoff, reviewer_check
 from .models import BakeoffImage, BakeoffPiece
 
 SCORE_LABELS = [
@@ -228,3 +228,54 @@ def photo(request, pk, field):
 def image_file(request, image_pk):
     image = get_object_or_404(BakeoffImage, pk=image_pk)
     return _file_response(image.file)
+
+
+# --- Reviewer check ------------------------------------------------------------------
+
+
+@login_required
+def reviewer(request):
+    run = reviewer_check.latest_run()
+    scored = reviewer_check.scored_images()
+    context = {
+        **_base_context(),
+        "run": run,
+        "scored_count": len(scored),
+        "would_reject": sum(1 for i in scored if not reviewer_check.founder_accepts(i)),
+        "estimate": reviewer_check.ESTIMATE_PER_IMAGE * len(scored),
+        "accept_score": settings.FDW_REVIEWER_ACCEPT_SCORE,
+        "score_labels": SCORE_LABELS,
+    }
+    if run:
+        context["progress"] = reviewer_check.progress(run)
+        context["info"] = reviewer_check.summary(run)
+        results = list(run.results.select_related("image", "image__piece"))
+        order = {False: 0, True: 1, None: 2}
+        context["results"] = sorted(results, key=lambda r: (order[r.agrees], r.founder_accepts, r.pk))
+    return render(request, "workflow/bakeoff_reviewer.html", context)
+
+
+@login_required
+@require_POST
+def reviewer_start(request):
+    try:
+        run = reviewer_check.start_run()
+        messages.success(request, f"Ready to review {run.results.count()} scored images. Press Run the check.")
+    except bakeoff.BakeoffError as exc:
+        messages.error(request, str(exc))
+    return redirect("bakeoff_reviewer")
+
+
+@login_required
+@require_POST
+def reviewer_next(request):
+    """Review one image. Called repeatedly by the page until every image is done."""
+    run = reviewer_check.latest_run()
+    if run is None:
+        return JsonResponse({"error": "Start a check first."}, status=409)
+    try:
+        result = reviewer_check.review_next(run)
+    except bakeoff.BakeoffError as exc:
+        return JsonResponse({"error": str(exc), "progress": reviewer_check.progress(run)}, status=409)
+    progress = reviewer_check.progress(run)
+    return JsonResponse({"finished": result is None or progress["waiting"] == 0, "progress": progress})

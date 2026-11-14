@@ -703,6 +703,7 @@
         <p class="stage-intro">Unlocks when you approve the sourcing sheet.</p>
       {% else %}
         <p class="stage-intro">Five shots per piece, drawn by {{ image_model }}. Shot A comes first and every other shot is drawn from it, so the piece stays the same across the set. A separate reviewer checks each image against the specification, colour strictly; a failed image is drawn again with the reviewer's correction, up to {{ max_attempts }} times. Only then does it reach you.</p>
+        {% if reviewer_status %}<p class="meta reviewer-check-line state-{{ reviewer_status.state }}">{{ reviewer_status.text }} <a href="{% url 'bakeoff_reviewer' %}">Reviewer check</a></p>{% endif %}
       {% endif %}
 
       {% if can_start_stage4 %}

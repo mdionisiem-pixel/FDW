@@ -29,7 +29,7 @@ from django.utils import timezone
 
 from . import prompts, schemas
 from .llm import StageError, cost_of, get_client, parse_json
-from .models import BakeoffImage, BakeoffPiece
+from .models import BakeoffImage, BakeoffPiece, ReviewerResult
 
 # Photos straight from a phone or camera are accepted and made smaller here.
 MAX_PHOTO_BYTES = 50 * 1024 * 1024
@@ -125,7 +125,9 @@ def _photo_payload(field_file):
 def total_spend() -> Decimal:
     images = BakeoffImage.objects.aggregate(total=Sum("cost_usd"))["total"] or Decimal("0")
     describing = BakeoffPiece.objects.aggregate(total=Sum("prompt_cost_usd"))["total"] or Decimal("0")
-    return images + describing
+    # The reviewer check on the Tools page shares this budget.
+    reviewing = ReviewerResult.objects.aggregate(total=Sum("cost_usd"))["total"] or Decimal("0")
+    return images + describing + reviewing
 
 
 def check_spend():
