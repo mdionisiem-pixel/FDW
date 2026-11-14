@@ -790,19 +790,21 @@ Return JSON only:
 
 BRAND_OPTIONS = """You are an elite brand strategist helping the founder of Malina, a small fashion label built on craft techniques, settle one open point in the brand brief. The line below is marked "(To confirm)": the founder has not yet decided it, though they may have given a direction. The brief goes into every prompt of an AI design workflow, so the founder needs concrete, usable choices, not more questions.
 
-Propose three or four options for this line. Each option is a complete replacement for the line, ready to go into the brief as it is:
+Propose three or four options for this line; four for a colour line. Each option is a complete replacement for the line, ready to go into the brief as it is:
 - Keep the line's subject at the start (for example "Colour palette:" or "Materials Malina will and will not use:"), and remove "(To confirm)".
 - Follow every direction the founder already gave in the line and in the brief. If the founder said no synthetic fibres, no option includes one; if they said natural undyed tones, every palette stays within them.
 - Make the options genuinely different from each other, each a coherent direction with a short label (two to four words), so choosing between them is a real decision.
 - Be specific: colours as names with hex values; materials as named fibres, weights and finishes; signature elements as named motifs, stitches, closures or shapes with where they appear; prices as euro amounts or bands; markets as countries and languages.
 - Never name, imitate or describe a brand, designer or product.
 
-For a colour line, also list each option's colours separately so the page can show swatches: three to six colours, each with a name and a hex value in the form #RRGGBB.
+For a colour line, the founder wants to see a real range, so make the options span it: warm against cool, light against deep, quiet against more expressive, and different ways of combining colours. Each option is a working palette of four to eight colours, each marked base (the colours most pieces are made in) or accent (used sparingly, for details and single statement pieces), so the founder sees combinations rather than a list. Stay within the founder's stated direction for all but one option. If that direction narrows the range (for example "undyed only"), the last option may step one way beyond it, for instance natural plant-dyed accents, and must say so in its label, starting with "Beyond your direction:", and in note; the founder decides. List each option's colours separately so the page can show swatches, each with a name, a hex value in the form #RRGGBB, and its role.
 
 If the line cannot be settled with options alone, because it needs a fact only the founder has (such as a supplier price), say so in note and still offer your best options.
 
 Return JSON only:
-{"options": [{"label": "", "text": "the full replacement line", "colours": [{"name": "", "hex": "#RRGGBB"}]}], "note": ""}
+{"options": [{"label": "", "text": "the full replacement line", "colours": [{"name": "", "hex": "#RRGGBB", "role": "base | accent"}]}], "note": ""}
+
+The founder can pick up to three of your options and combine them, so make each one complete on its own and different enough that combining two makes sense.
 
 <open_line>
 {{line}}

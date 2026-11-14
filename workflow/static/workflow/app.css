@@ -959,5 +959,22 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .option-body { display: grid; gap: 0.3rem; min-width: 0; }
 .option-text { font-size: 0.9rem; color: var(--ink-soft); overflow-wrap: anywhere; }
 .swatches { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.swatch-groups { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+.swatch-group { display: inline-flex; gap: 0.25rem; }
+.swatch-group:empty { display: none; }
+.swatch-accents { padding-left: 0.6rem; border-left: 1.5px dashed var(--line); }
+.swatch-accents .swatch { width: 1.1rem; height: 1.1rem; border-radius: 50%; }
+.swatch-names { font-size: 0.78rem; color: var(--ink-soft); }
+.option-beyond { border-style: dashed; }
+.choice-note { margin: 0; }
+.choice-note[hidden] { display: none; }
+.option-beyond strong { color: var(--ochre); }
+.open-point-rework { border-color: var(--line); }
+.rework-tag { margin: 0; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+.open-point-actions { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; }
+.rework-form { display: grid; gap: 0.4rem; margin-top: 1rem; padding-top: 1rem; border-top: 1.5px dashed var(--line); }
+.rework-form select { max-width: 100%; }
+.rework-form .btn { justify-self: start; }
+.rework-form .meta { margin: 0; }
 .swatch { width: 1.6rem; height: 1.6rem; border-radius: 6px; border: 1px solid rgba(27, 33, 64, 0.18); }
 .option-form textarea { width: 100%; box-sizing: border-box; }

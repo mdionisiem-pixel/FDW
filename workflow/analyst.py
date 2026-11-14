@@ -100,13 +100,22 @@ class DryRunAnalyst:
     def complete(self, prompt: str, max_tokens: int, effort: str) -> Reply:
         if "<open_line>" in prompt:
             subject = prompt.split("<open_line>")[1].split("</open_line>")[0].strip().split("(")[0].split(":")[0].strip()
-            colours = [[("Oat", "#D8CBB0"), ("Undyed ecru", "#EDE6D6"), ("Walnut", "#5C4632")],
-                       [("Flax", "#C9B48A"), ("Stone", "#A39B8B"), ("Charcoal wool", "#4A4744")],
-                       [("Milk", "#F3EFE6"), ("Sand", "#D9C4A0"), ("Moss", "#6B6F4E")]]
+            sets = [
+                ("Warm undyed", [("Natural Ecru", "#E8DCC6", "base"), ("Hemp", "#CBB896", "base"),
+                                 ("Walnut Husk", "#6E5138", "base"), ("Deep Soil", "#3E3226", "accent")]),
+                ("Cool stone", [("Milk", "#F3EFE6", "base"), ("Stone", "#A39B8B", "base"),
+                                ("Slate", "#5E6266", "base"), ("Charcoal wool", "#3A3836", "accent")]),
+                ("Light and airy", [("Linen", "#EFE7D8", "base"), ("Oat", "#D8CBB0", "base"),
+                                    ("Sand", "#D9C4A0", "base"), ("Driftwood", "#9C8B73", "accent")]),
+                ("Beyond your direction: plant-dyed accents", [
+                    ("Natural Ecru", "#E8DCC6", "base"), ("Hemp", "#CBB896", "base"),
+                    ("Indigo", "#2F4A6D", "accent"), ("Madder", "#A1423A", "accent"), ("Weld", "#C9A63A", "accent")]),
+            ]
             return Reply(json.dumps({"options": [
-                {"label": f"Sample direction {n + 1}", "text": f"{subject}: sample option {n + 1} from the dry run.",
-                 "colours": [{"name": a, "hex": b} for a, b in colours[n]]} for n in range(3)],
-                "note": "Sample options: the dry run does not read the brief."}))
+                {"label": label, "text": f"{subject}: " + ", ".join(f"{n} {h}" for n, h, _ in cols) + ".",
+                 "colours": [{"name": n, "hex": h, "role": r} for n, h, r in cols]} for label, cols in sets],
+                "note": "Sample options: the dry run does not read the brief. The last option goes beyond the "
+                        "stated direction."}))
         if "<interview>" in prompt:
             return Reply(json.dumps({
                 "vision": "A wardrobe where every piece is made to be kept, mended and handed on. (To confirm)",
@@ -527,15 +536,54 @@ def check_draft(draft: dict, starting_brief: str, founder_answers: str) -> dict:
 OPEN_MARKER = "(To confirm)"
 
 
+MAX_CHOICES = 3
+
+
 def open_points(brief: BrandBrief) -> list:
-    """Each line of the brief text still marked "(To confirm)", with any options already suggested for it."""
+    """Lines still marked "(To confirm)", and settled lines the founder asked to rework,
+    each with any options already suggested for it."""
+    saved_lines = {o.line: o for o in OpenPointOptions.objects.all()}
     points = []
     for line in brief.text.splitlines():
-        if OPEN_MARKER.lower() in line.lower():
-            line = line.strip()
-            saved = OpenPointOptions.objects.filter(line=line).first()
-            points.append({"line": line, "options": saved.options if saved else [], "note": saved.note if saved else ""})
+        line = line.strip()
+        is_open = OPEN_MARKER.lower() in line.lower()
+        if is_open or line in saved_lines:
+            saved = saved_lines.get(line)
+            points.append({"line": line, "rework": not is_open,
+                           "options": saved.options if saved else [], "note": saved.note if saved else ""})
     return points
+
+
+def reworkable_lines(brief: BrandBrief) -> list:
+    """Settled lines the founder may ask for fresh options on: not headings, not
+    open points (they are listed already), and never a hard rule."""
+    protected = {_norm(r) for r in protected_rules(brief.text)}
+    lines = []
+    for line in brief.text.splitlines():
+        line = line.strip()
+        if (len(line) < 25 or line.endswith(":") or line.isupper() or OPEN_MARKER.lower() in line.lower()
+                or _norm(line) in protected):
+            continue
+        lines.append(line)
+    return lines
+
+
+def combine_options(line: str, chosen_texts: list) -> str:
+    """One brief line from up to three chosen options: the line's subject, then each
+    option's own content under its label. The founder can still edit the result."""
+    saved = OpenPointOptions.objects.filter(line=line.strip()).first()
+    by_text = {o["text"]: o for o in (saved.options if saved else [])}
+    chosen = [by_text[t] for t in chosen_texts if t in by_text][:MAX_CHOICES]
+    if not chosen:
+        return ""
+    if len(chosen) == 1:
+        return chosen[0]["text"]
+    subject = chosen[0]["text"].split(":", 1)[0].strip()
+    parts = []
+    for option in chosen:
+        body = option["text"].split(":", 1)[1].strip() if ":" in option["text"] else option["text"]
+        parts.append(f"{option['label']}: {body.rstrip('.')}")
+    return f"{subject}, {len(chosen)} combined directions. " + " | ".join(parts) + "."
 
 
 def suggest_options(line: str, client=None) -> OpenPointOptions:
@@ -544,11 +592,18 @@ def suggest_options(line: str, client=None) -> OpenPointOptions:
     brief = BrandBrief.current()
     if line not in [l.strip() for l in brief.text.splitlines()]:
         raise AnalystError("That line has changed since the page loaded. Reload the page and try again.")
+    if _norm(line) in {_norm(r) for r in protected_rules(brief.text)}:
+        raise AnalystError("Hard rules protect buyers and are not reworked from options. Change one under Edit by hand "
+                           "if you really mean to.")
     prompt = prompts.render(prompts.BRAND_OPTIONS, line=line, brief=brief.prompt_text)
     result, cost = _call(None, client or get_client(), "options", prompt, settings.FDW_ANALYST_TURN_TOKENS,
                          settings.FDW_ANALYST_TURN_EFFORT, schemas.validate_open_point_options)
     OpenPointOptions.objects.filter(line=line).delete()
     return OpenPointOptions.objects.create(line=line, options=result["options"], note=result["note"], cost_usd=cost)
+
+
+def stop_rework(line: str) -> None:
+    OpenPointOptions.objects.filter(line=line.strip()).delete()
 
 
 def settle_point(line: str, new_text: str) -> BrandBrief:

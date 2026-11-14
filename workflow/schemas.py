@@ -1021,7 +1021,7 @@ def validate_open_point_options(data):
     if not isinstance(raw, list):
         raise SchemaError(["options must be a list"])
     options, problems = [], []
-    for index, item in enumerate(raw[:4]):
+    for index, item in enumerate(raw[:5]):
         if not isinstance(item, dict) or not _is_text(item.get("text")):
             problems.append(f"options[{index}] needs text: the full replacement line")
             continue
@@ -1032,9 +1032,12 @@ def validate_open_point_options(data):
         colours = []
         for colour in item.get("colours") or []:
             if isinstance(colour, dict) and _is_text(colour.get("name")) and HEX_COLOUR.match(str(colour.get("hex", "")).strip()):
-                colours.append({"name": colour["name"].strip(), "hex": colour["hex"].strip().upper()})
-        options.append({"label": str(item.get("label") or f"Option {index + 1}").strip()[:60], "text": text,
-                        "colours": colours[:6]})
+                role = str(colour.get("role") or "").strip().lower()
+                colours.append({"name": colour["name"].strip(), "hex": colour["hex"].strip().upper(),
+                                "role": "accent" if role == "accent" else "base"})
+        label = str(item.get("label") or f"Option {index + 1}").strip()[:80]
+        options.append({"label": label, "text": text, "colours": colours[:8],
+                        "beyond": label.lower().startswith("beyond your direction")})
     if len(options) < 2:
         problems.append("give at least two usable options")
     if problems:

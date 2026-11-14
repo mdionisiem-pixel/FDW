@@ -594,7 +594,8 @@ class OpenPointTests(TestCase):
         saved = analyst.suggest_options(PALETTE, client)
         self.assertIn("natural undyed tones", client.calls[0]["prompt"])
         self.assertIn("- Never use leather.", client.calls[0]["prompt"])
-        self.assertEqual(saved.options[0]["colours"], [{"name": "Oat", "hex": "#D8CBB0"}, {"name": "Ecru", "hex": "#EDE6D6"}])
+        self.assertEqual(saved.options[0]["colours"], [{"name": "Oat", "hex": "#D8CBB0", "role": "base"},
+                                                       {"name": "Ecru", "hex": "#EDE6D6", "role": "base"}])
         self.assertEqual(analyst.open_points(BrandBrief.current())[0]["options"][1]["label"], "Stone and flax")
         call = AnalystCall.objects.get()
         self.assertEqual((call.kind, call.interview), ("options", None))
@@ -651,15 +652,103 @@ class OpenPointPageTests(TestCase):
         self.assertContains(page, "Suggest options")
         self.client.post(reverse("brand_suggest_options"), {"line": PALETTE})
         page = self.client.get(reverse("brand_brief"))
-        self.assertContains(page, "Sample direction 1")
-        self.assertContains(page, 'class="swatch" style="background: #D8CBB0"')
-        self.client.post(reverse("brand_settle_point"), {"line": PALETTE, "choice": "Colour palette: Oat #D8CBB0.", "own": ""})
-        self.assertIn("Colour palette: Oat #D8CBB0.", BrandBrief.current().text)
+        self.assertContains(page, "Warm undyed")
+        self.assertContains(page, 'class="swatch" style="background: #E8DCC6"')
+        first = analyst.open_points(BrandBrief.current())[0]["options"][0]["text"]
+        self.client.post(reverse("brand_settle_point"), {"line": PALETTE, "choice": first, "own": ""})
+        self.assertIn(first, BrandBrief.current().text)
         page = self.client.get(reverse("brand_brief"))
-        self.assertNotContains(page, "Open points")
+        self.assertNotContains(page, '<article class="open-point')
         self.assertContains(page, "All lines confirmed")
 
     def test_your_own_wording_wins_over_the_picked_option(self):
         self.client.post(reverse("brand_settle_point"), {"line": PALETTE, "choice": "Colour palette: Oat.",
                                                           "own": "Colour palette: Oat #D8CBB0 and Walnut #5C4632."})
         self.assertIn("Colour palette: Oat #D8CBB0 and Walnut #5C4632.", BrandBrief.current().text)
+
+
+RANGE = json.dumps({"options": [
+    {"label": "Warm undyed", "text": "Colour palette: Ecru #E8DCC6, Hemp #CBB896, Walnut #6E5138.",
+     "colours": [{"name": "Ecru", "hex": "#E8DCC6", "role": "base"}, {"name": "Walnut", "hex": "#6E5138", "role": "accent"}]},
+    {"label": "Cool stone", "text": "Colour palette: Milk #F3EFE6, Stone #A39B8B.",
+     "colours": [{"name": "Milk", "hex": "#F3EFE6"}]},
+    {"label": "Light and airy", "text": "Colour palette: Linen #EFE7D8, Oat #D8CBB0.", "colours": []},
+    {"label": "Beyond your direction: plant-dyed accents", "text": "Colour palette: Ecru #E8DCC6 with Indigo #2F4A6D.",
+     "colours": [{"name": "Indigo", "hex": "#2F4A6D", "role": "accent"}]},
+], "note": "The last option goes beyond the stated direction."})
+SETTLED = "Colour palette: warm natural undyed tones. Natural Ecru #E8DCC6, Hemp #CBB896. No bright dyed colours anywhere."
+
+
+@override_settings(FDW_DRY_RUN=False, FDW_OPTIONS_DAILY_LIMIT_USD=Decimal("1"))
+class PaletteRangeTests(TestCase):
+    def setUp(self):
+        brief = BrandBrief.current()
+        brief.text = "BRAND BRIEF\n" + SETTLED + "\n\nHard rules:\n- Never claim a piece is handmade unless its tier is Atelier.\n"
+        brief.save()
+
+    def test_the_prompt_asks_for_a_real_range_and_marks_any_step_beyond_the_direction(self):
+        self.assertIn("warm against cool, light against deep", prompts.BRAND_OPTIONS)
+        self.assertIn('"Beyond your direction:"', prompts.BRAND_OPTIONS)
+        self.assertIn("pick up to three", prompts.BRAND_OPTIONS)
+
+    def test_roles_and_the_beyond_label_are_kept(self):
+        saved = analyst.suggest_options(SETTLED, ScriptedAnalyst(RANGE))
+        self.assertEqual(len(saved.options), 4)
+        self.assertEqual([c["role"] for c in saved.options[0]["colours"]], ["base", "accent"])
+        self.assertEqual(saved.options[1]["colours"][0]["role"], "base")  # no role given means base
+        self.assertEqual([o["beyond"] for o in saved.options], [False, False, False, True])
+
+    def test_a_settled_line_can_be_reworked_and_is_listed_until_settled_or_dropped(self):
+        self.assertIn(SETTLED, analyst.reworkable_lines(BrandBrief.current()))
+        analyst.suggest_options(SETTLED, ScriptedAnalyst(RANGE))
+        points = analyst.open_points(BrandBrief.current())
+        self.assertEqual([(p["line"], p["rework"]) for p in points], [(SETTLED, True)])
+        analyst.stop_rework(SETTLED)
+        self.assertEqual(analyst.open_points(BrandBrief.current()), [])
+
+    def test_hard_rules_cannot_be_reworked(self):
+        rule = "- Never claim a piece is handmade unless its tier is Atelier."
+        self.assertNotIn(rule, analyst.reworkable_lines(BrandBrief.current()))
+        with self.assertRaisesMessage(analyst.AnalystError, "Hard rules protect buyers"):
+            analyst.suggest_options(rule, ScriptedAnalyst(RANGE))
+
+    def test_two_choices_combine_into_one_line_under_their_labels(self):
+        analyst.suggest_options(SETTLED, ScriptedAnalyst(RANGE))
+        line = analyst.combine_options(SETTLED, ["Colour palette: Ecru #E8DCC6, Hemp #CBB896, Walnut #6E5138.",
+                                                 "Colour palette: Ecru #E8DCC6 with Indigo #2F4A6D."])
+        self.assertEqual(line, "Colour palette, 2 combined directions. Warm undyed: Ecru #E8DCC6, Hemp #CBB896, "
+                               "Walnut #6E5138 | Beyond your direction: plant-dyed accents: Ecru #E8DCC6 with Indigo #2F4A6D.")
+        self.assertEqual(analyst.combine_options(SETTLED, ["Colour palette: Milk #F3EFE6, Stone #A39B8B."]),
+                         "Colour palette: Milk #F3EFE6, Stone #A39B8B.")
+        self.assertEqual(analyst.combine_options(SETTLED, ["not an option"]), "")
+
+
+@override_settings(FDW_DRY_RUN=True)
+class PaletteRangePageTests(TestCase):
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
+        brief = BrandBrief.current()
+        brief.text = "BRAND BRIEF\n" + SETTLED + "\n"
+        brief.save()
+
+    def test_rework_pick_two_and_save_through_the_page(self):
+        page = self.client.get(reverse("brand_brief"))
+        self.assertContains(page, "Rework a settled line")
+        self.client.post(reverse("brand_suggest_options"), {"line": SETTLED})
+        page = self.client.get(reverse("brand_brief"))
+        self.assertContains(page, "Reworking a settled line")
+        self.assertContains(page, 'type="checkbox" name="choice"', count=4)
+        self.assertContains(page, "option-beyond")
+        self.assertContains(page, "(accent)")
+        options = analyst.open_points(BrandBrief.current())[0]["options"]
+        self.client.post(reverse("brand_settle_point"), {"line": SETTLED, "choice": [options[0]["text"], options[3]["text"]], "own": ""})
+        text = BrandBrief.current().text
+        self.assertIn("Colour palette, 2 combined directions. Warm undyed:", text)
+        self.assertNotIn(SETTLED, text)
+
+    def test_more_than_three_choices_are_refused(self):
+        self.client.post(reverse("brand_suggest_options"), {"line": SETTLED})
+        options = analyst.open_points(BrandBrief.current())[0]["options"]
+        response = self.client.post(reverse("brand_settle_point"), {"line": SETTLED, "choice": [o["text"] for o in options], "own": ""}, follow=True)
+        self.assertContains(response, "Choose at most 3 options.")
+        self.assertIn(SETTLED, BrandBrief.current().text)

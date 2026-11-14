@@ -25,6 +25,7 @@ urlpatterns = [
     path("brand-brief/versions/<int:pk>/restore/", views_brand.restore_version, name="brand_restore"),
     path("brand-brief/open-points/suggest/", views_brand.suggest_options, name="brand_suggest_options"),
     path("brand-brief/open-points/settle/", views_brand.settle_point, name="brand_settle_point"),
+    path("brand-brief/open-points/stop/", views_brand.stop_rework, name="brand_stop_rework"),
     path("brand-brief/interview/", views_brand.interview, name="brand_interview"),
     path("brand-brief/interview/start/", views_brand.interview_start, name="brand_interview_start"),
     path("brand-brief/interview/<int:pk>/answer/", views_brand.interview_answer, name="brand_interview_answer"),
