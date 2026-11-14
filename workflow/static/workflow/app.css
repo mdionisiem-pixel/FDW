@@ -1012,3 +1012,8 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .bt-discard { margin-top: 1rem; }
 .bt-history { margin: 0; padding-left: 1.2rem; }
 @media (max-width: 760px) { .bt-sets { grid-template-columns: 1fr; } }
+
+/* Brief test: starting a new paid test is tucked away under a finished one. */
+.new-test > summary { cursor: pointer; font-family: var(--display, inherit); font-size: 1.15rem; list-style-position: inside; }
+.new-test > summary .meta { font-size: 0.85rem; margin-left: 0.4rem; }
+.new-test[open] > summary { margin-bottom: 1rem; }

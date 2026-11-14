@@ -1,0 +1,16 @@
+{% if cycles and versions %}
+  <form method="post" action="{% url 'bakeoff_brief_test_start' %}" class="brief-test-form" data-working="Designing two sets of collections, one with each brand brief" data-loader="machine" data-quips="design">
+    {% csrf_token %}
+    <label for="bt-cycle">Cycle to copy (its approved research brief is used for both runs)</label>
+    <select id="bt-cycle" name="cycle">{% for c in cycles %}<option value="{{ c.pk }}">{{ c.name }}</option>{% endfor %}</select>
+    <label for="bt-version">Earlier brand brief to compare with the current one</label>
+    <select id="bt-version" name="version">
+      {% for v in versions %}<option value="{{ v.pk }}"{% if v == default_version %} selected{% endif %}>{{ v.created_at|date:"j M Y, H:i" }} · {{ v.get_source_display }}{% if v.note %} · {{ v.note|truncatechars:60 }}{% endif %}</option>{% endfor %}
+    </select>
+    <label class="check"><input type="checkbox" name="confirm" value="1" required> I want to start a new test and spend about ${{ estimate|floatformat:2 }} on it.</label>
+    <button class="btn btn-primary" type="submit">Start a new test</button>
+    <p class="meta">About ${{ estimate|floatformat:2 }} for both runs, from what stage 2 has cost on your cycles; stops at ${{ limit|floatformat:2 }} (FDW_BRIEF_TEST_LIMIT_USD). It takes as long as one stage 2 run, since both run at once. Your real cycles are not touched.{% if dry_run %} Dry run: sample designs, no cost.{% endif %}</p>
+  </form>
+{% else %}
+  <p>You need a cycle with an approved research brief and at least one earlier version of the brand brief.</p>
+{% endif %}
