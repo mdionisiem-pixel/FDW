@@ -93,10 +93,23 @@ def _research_items():
     return items
 
 
+# Stage 4 records a decision for every piece and every shot. Approving an image says
+# nothing about the brand, so only the stage's summary and the pieces sent back or
+# dropped are evidence; the rest would crowd out what matters.
+STAGE4_TELLING = ("rejected", "changes requested")
+
+
+def _is_telling(a) -> bool:
+    if a.stage != 4:
+        return True
+    return a.item == "Visual prototypes" or a.decision in STAGE4_TELLING
+
+
 def _decision_items():
     items = []
-    approvals = (Approval.objects.filter(cycle__is_test=False).select_related("cycle")
-                 .order_by("-decided_at")[:MAX_DECISIONS])
+    recent = (Approval.objects.filter(cycle__is_test=False).select_related("cycle")
+              .order_by("-decided_at")[:MAX_DECISIONS * 5])
+    approvals = [a for a in recent if _is_telling(a)][:MAX_DECISIONS]
     for a in approvals:
         line = f"Stage {a.stage}, {a.cycle.name}: {a.decision} {_clean(a.item, 120)}"
         if a.notes:
