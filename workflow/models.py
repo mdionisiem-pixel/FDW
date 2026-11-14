@@ -179,8 +179,9 @@ class BrandInterview(models.Model):
 class AnalystCall(models.Model):
     """One call to the analyst model, kept so a bad question or draft can be traced to what was sent and returned."""
 
-    interview = models.ForeignKey(BrandInterview, on_delete=models.CASCADE, related_name="calls")
-    kind = models.CharField(max_length=20)  # question, question_retry, draft, draft_retry
+    # Empty for calls outside an interview, such as options for an open point in the brief.
+    interview = models.ForeignKey(BrandInterview, on_delete=models.CASCADE, related_name="calls", null=True, blank=True)
+    kind = models.CharField(max_length=20)  # question, draft, options, each with _retry
     model = models.CharField(max_length=120)
     provider = models.CharField(max_length=80, blank=True)
     prompt = models.TextField()
@@ -200,6 +201,23 @@ class AnalystCall(models.Model):
 
     def __str__(self):
         return f"{self.kind} ({self.model}, {self.seconds}s)"
+
+
+class OpenPointOptions(models.Model):
+    """Options the analyst proposed for one line of the brief still marked "(To confirm)".
+
+    Kept against the exact line text, so they show again after a reload and are
+    simply ignored once that line has changed."""
+
+    line = models.TextField()
+    # Each option: {"label": "", "text": "replacement line", "colours": [{"name": "", "hex": "#RRGGBB"}]}
+    options = models.JSONField(default=list)
+    note = models.TextField(blank=True)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
 
 
 class InterviewTurn(models.Model):

@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.http import require_POST
 
 from . import analyst
@@ -39,10 +40,35 @@ def brand_brief(request):
             {"title": "Long-term goals", "horizon": "3 to 5 years", "goals": brief.long_goals},
         ],
         "interview": analyst.current_interview(),
+        "open_points": analyst.open_points(brief),
         "versions": BrandBriefVersion.objects.all()[:12],
         "analyst_model": settings.FDW_MODEL_ANALYST,
         "dry_run": settings.FDW_DRY_RUN,
     })
+
+
+@login_required
+@require_POST
+def suggest_options(request):
+    try:
+        analyst.suggest_options(request.POST.get("line", ""))
+    except analyst.AnalystError as exc:
+        messages.error(request, str(exc))
+    return redirect(reverse("brand_brief") + "#open-points")
+
+
+@login_required
+@require_POST
+def settle_point(request):
+    """The founder's own wording wins over a picked option, since it may be an edited copy of one."""
+    text = request.POST.get("own", "").strip() or request.POST.get("choice", "")
+    try:
+        analyst.settle_point(request.POST.get("line", ""), text)
+    except analyst.AnalystError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "Settled. The new line applies to every stage run from now on.")
+    return redirect(reverse("brand_brief") + "#open-points")
 
 
 @login_required

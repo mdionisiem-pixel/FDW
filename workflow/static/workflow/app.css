@@ -943,3 +943,21 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .lc-removed .lc-mark { color: var(--floss-deep); }
 .lc-same { color: var(--ink-soft); }
 .lc-gap { text-align: center; color: var(--ink-soft); background: var(--chalk); padding-left: 0.6rem; }
+
+/* Open points: lines still marked "To confirm", with options to choose from */
+.open-points { margin: 1.5rem 0; }
+.open-points h2 { font-size: 1.15rem; margin: 0 0 0.25rem; }
+.open-points h2 .meta { font-family: var(--body); font-weight: 400; font-size: 0.85rem; margin-left: 0.35rem; }
+.open-point { background: var(--paper); border: 1.5px solid #e2c877; border-radius: var(--radius); padding: 0.9rem 1rem; margin: 0.75rem 0; display: grid; gap: 0.6rem; }
+.open-line { margin: 0; font-weight: 600; }
+.option-form { display: grid; gap: 0.5rem; }
+.option-list { border: 0; margin: 0; padding: 0; display: grid; gap: 0.45rem; }
+.option-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.6rem; align-items: start; border: 1.5px solid var(--line); border-radius: var(--radius); padding: 0.6rem 0.75rem; cursor: pointer; background: var(--paper); }
+.option-card:hover { border-color: var(--floss); }
+.option-card:has(input:checked) { border-color: var(--floss); background: var(--floss-wash); }
+.option-card input { margin-top: 0.25rem; }
+.option-body { display: grid; gap: 0.3rem; min-width: 0; }
+.option-text { font-size: 0.9rem; color: var(--ink-soft); overflow-wrap: anywhere; }
+.swatches { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.swatch { width: 1.6rem; height: 1.6rem; border-radius: 6px; border: 1px solid rgba(27, 33, 64, 0.18); }
+.option-form textarea { width: 100%; box-sizing: border-box; }

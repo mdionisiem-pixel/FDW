@@ -745,6 +745,7 @@ How to interview
 - Offer two to four short example answers the founder can tap and edit. Base them on what is known about Malina, make them genuinely different from each other (include one that pushes in a different direction), and keep each under 20 words. They are prompts for thinking, not the answer you want.
 - If the founder says they do not know or wants to skip, accept it, and move to the next area; the draft will mark the gap as to be confirmed.
 - Aim for a complete picture in about 12 to 18 questions. Set ready_to_draft to true when every area is at least 2, or when the founder says they want the draft now.
+- Before you set ready_to_draft, work through every line of the current brief still marked "(To confirm)" that the conversation has not settled. Ask about each in turn, and make the examples concrete choices the founder can adopt as they are: for a colour palette, three to five named colours with hex values (for example "Oat #D8CBB0, Undyed ecru #EDE6D6, Walnut #5C4632"); for materials, specific fibres and finishes; for signature elements, specific motifs, stitches or details; for prices, euro amounts. Base them on what the founder has already said, and make the options differ from each other in a way that matters.
 - When ready_to_draft is true and nothing essential is left to ask, leave question, area and examples empty and say in reflection that the picture is complete; do not invent a question to fill the turn. If something important is still open, ask it, and ready_to_draft can still be true.
 
 Coverage scale for each area: 0 nothing known, 1 thin or vague, 2 clear enough to write, 3 sharp and specific.
@@ -773,6 +774,7 @@ Rules that are not negotiable:
 - Keep every rule in the current brief about production tiers, handmade claims, fibre, origin, certification and sustainability claims, and the concept-render label, word for word, in the RULES section, unless the founder explicitly changed one in the interview. These protect buyers from false claims.
 - Keep any other fact from the current brief that the interview did not change.
 - Write only what the founder said or what the current brief states. Where you had to infer or fill a gap, write your best reading and add "(To confirm)" at the end of that line. Never invent numbers, prices, dates or customers.
+- Where the founder chose or confirmed a specific answer for a line marked "(To confirm)" in the current brief, write that answer and remove the marker. Where the founder gave only a direction, keep the marker; the founder can settle it from options afterwards.
 - If the founder's answers contradict each other or the brief, choose the most recent answer and list the conflict under to_confirm.
 
 Return JSON only:
@@ -784,3 +786,27 @@ Return JSON only:
 <interview>
 {{conversation}}
 </interview>"""
+
+
+BRAND_OPTIONS = """You are an elite brand strategist helping the founder of Malina, a small fashion label built on craft techniques, settle one open point in the brand brief. The line below is marked "(To confirm)": the founder has not yet decided it, though they may have given a direction. The brief goes into every prompt of an AI design workflow, so the founder needs concrete, usable choices, not more questions.
+
+Propose three or four options for this line. Each option is a complete replacement for the line, ready to go into the brief as it is:
+- Keep the line's subject at the start (for example "Colour palette:" or "Materials Malina will and will not use:"), and remove "(To confirm)".
+- Follow every direction the founder already gave in the line and in the brief. If the founder said no synthetic fibres, no option includes one; if they said natural undyed tones, every palette stays within them.
+- Make the options genuinely different from each other, each a coherent direction with a short label (two to four words), so choosing between them is a real decision.
+- Be specific: colours as names with hex values; materials as named fibres, weights and finishes; signature elements as named motifs, stitches, closures or shapes with where they appear; prices as euro amounts or bands; markets as countries and languages.
+- Never name, imitate or describe a brand, designer or product.
+
+For a colour line, also list each option's colours separately so the page can show swatches: three to six colours, each with a name and a hex value in the form #RRGGBB.
+
+If the line cannot be settled with options alone, because it needs a fact only the founder has (such as a supplier price), say so in note and still offer your best options.
+
+Return JSON only:
+{"options": [{"label": "", "text": "the full replacement line", "colours": [{"name": "", "hex": "#RRGGBB"}]}], "note": ""}
+
+<open_line>
+{{line}}
+</open_line>
+<brand_brief>
+{{brief}}
+</brand_brief>"""
