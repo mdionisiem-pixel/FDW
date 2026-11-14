@@ -17,7 +17,13 @@ REVIEW_CRITERIA = (
     "makeability",
     "price_fit",
     "spec_completeness",
+    "desirability",
+    "range_variety",
+    "design_quality",
 )
+# The creative criteria. A score below FDW_DESIGN_MIN_SCORE on any of them
+# sends the concept back to the designer, like a blocking issue.
+DESIGN_CRITERIA = ("desirability", "range_variety", "design_quality")
 REVIEW_OVERALL = {"recommend", "revise", "reject"}
 FINDING_TIMEFRAMES = {"recurring", "current", "both"}
 CATEGORIES = ("knitwear", "apparel", "outerwear", "accessories", "bags", "footwear", "jewellery", "other")
