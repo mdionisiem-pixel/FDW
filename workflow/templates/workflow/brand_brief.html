@@ -41,12 +41,51 @@
     {% endif %}
   </aside>
 
-  {% if brief.unconfirmed_lines %}
+  {% if open_points %}
+    <section class="open-points" id="open-points" aria-labelledby="open-points-title">
+      <h2 id="open-points-title">Open points <span class="meta">{{ open_points|length }} line{{ open_points|pluralize }} still marked "To confirm"</span></h2>
+      <p class="meta">Designs and images are judged against these lines, so each one left open is a guess. Ask the analyst for options, pick one, edit it, or write your own.</p>
+      {% for p in open_points %}
+        <article class="open-point">
+          <p class="open-line">{{ p.line }}</p>
+          {% if p.options %}
+            <form method="post" action="{% url 'brand_settle_point' %}" class="option-form" data-option-form>
+              {% csrf_token %}
+              <input type="hidden" name="line" value="{{ p.line }}">
+              <fieldset class="option-list">
+                <legend class="visually-hidden">Options</legend>
+                {% for o in p.options %}
+                  <label class="option-card">
+                    <input type="radio" name="choice" value="{{ o.text }}">
+                    <span class="option-body">
+                      <strong>{{ o.label }}</strong>
+                      {% if o.colours %}<span class="swatches" aria-hidden="true">{% for c in o.colours %}<span class="swatch" style="background: {{ c.hex }}" title="{{ c.name }} {{ c.hex }}"></span>{% endfor %}</span>{% endif %}
+                      <span class="option-text">{{ o.text }}</span>
+                    </span>
+                  </label>
+                {% endfor %}
+              </fieldset>
+              {% if p.note %}<p class="meta">{{ p.note }}</p>{% endif %}
+              <label for="own-{{ forloop.counter }}">Or edit the chosen option, or write your own</label>
+              <textarea id="own-{{ forloop.counter }}" name="own" rows="2" placeholder="Leave empty to use the option as it is."></textarea>
+              <div class="form-foot">
+                <button class="btn btn-primary" type="submit">Use this line</button>
+              </div>
+            </form>
+          {% endif %}
+          <form method="post" action="{% url 'brand_suggest_options' %}" data-working="The analyst is preparing options for this line" data-loader="cross" data-quips="analyst">
+            {% csrf_token %}<input type="hidden" name="line" value="{{ p.line }}">
+            <button class="btn{% if not p.options %} btn-primary{% endif %}" type="submit">{% if p.options %}Suggest different options{% else %}Suggest options{% endif %}</button>
+          </form>
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+  {% if brief.unconfirmed_lines > open_points|length %}
     <aside class="callout">
-      <p><strong>{{ brief.unconfirmed_lines }} line{{ brief.unconfirmed_lines|pluralize }} still marked "To confirm".</strong>
-      Replace each one with your answer and remove the marker.</p>
+      <p>The vision, mission or goals also contain "To confirm". Settle those under <strong>Edit by hand</strong>.</p>
     </aside>
-  {% else %}
+  {% elif not brief.unconfirmed_lines %}
     <p class="stamp stamp-ok">All lines confirmed</p>
   {% endif %}
 

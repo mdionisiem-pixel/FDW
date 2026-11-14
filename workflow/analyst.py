@@ -15,7 +15,11 @@ from django.db import transaction
 
 from . import bakeoff, prompts, schemas
 from .llm import parse_json
-from .models import LONG, SHORT, AnalystCall, BrandBrief, BrandBriefVersion, BrandInterview, InterviewTurn
+from django.db.models import Sum
+from django.utils import timezone
+
+from .models import (LONG, SHORT, AnalystCall, BrandBrief, BrandBriefVersion, BrandInterview, InterviewTurn,
+                     OpenPointOptions)
 
 AREAS = prompts.BRAND_AREAS
 MAX_ANSWER_CHARS = 4000
@@ -94,6 +98,15 @@ class DryRunAnalyst:
     """Stand-in answers for FDW_DRY_RUN: walks the areas in order and drafts a sample brief."""
 
     def complete(self, prompt: str, max_tokens: int, effort: str) -> Reply:
+        if "<open_line>" in prompt:
+            subject = prompt.split("<open_line>")[1].split("</open_line>")[0].strip().split("(")[0].split(":")[0].strip()
+            colours = [[("Oat", "#D8CBB0"), ("Undyed ecru", "#EDE6D6"), ("Walnut", "#5C4632")],
+                       [("Flax", "#C9B48A"), ("Stone", "#A39B8B"), ("Charcoal wool", "#4A4744")],
+                       [("Milk", "#F3EFE6"), ("Sand", "#D9C4A0"), ("Moss", "#6B6F4E")]]
+            return Reply(json.dumps({"options": [
+                {"label": f"Sample direction {n + 1}", "text": f"{subject}: sample option {n + 1} from the dry run.",
+                 "colours": [{"name": a, "hex": b} for a, b in colours[n]]} for n in range(3)],
+                "note": "Sample options: the dry run does not read the brief."}))
         if "<interview>" in prompt:
             return Reply(json.dumps({
                 "vision": "A wardrobe where every piece is made to be kept, mended and handed on. (To confirm)",
@@ -179,13 +192,26 @@ def _ask(interview, client, kind, prompt, max_tokens, effort) -> Reply:
     return reply
 
 
+def _check_options_spend():
+    since = timezone.now() - timezone.timedelta(hours=24)
+    spent = AnalystCall.objects.filter(interview__isnull=True, created_at__gte=since).aggregate(
+        total=Sum("cost_usd"))["total"] or Decimal("0")
+    if spent >= settings.FDW_OPTIONS_DAILY_LIMIT_USD:
+        raise AnalystError(
+            f"Option suggestions have spent ${spent:.2f} in the last 24 hours, the limit of "
+            f"${settings.FDW_OPTIONS_DAILY_LIMIT_USD:.2f}. Try again tomorrow, or raise FDW_OPTIONS_DAILY_LIMIT_USD in .env.")
+
+
 def _call(interview, client, kind, prompt, max_tokens, effort, validate):
     """One answer, retried once if it cannot be used.
 
     A reply cut off at the length limit (the model spent its budget thinking)
     is asked again with twice the room; any other unusable reply is asked
     again with the problems listed."""
-    _check_spend(interview)
+    if interview is not None:
+        _check_spend(interview)
+    else:
+        _check_options_spend()
     attempt_prompt, attempt_tokens, attempt_kind = prompt, max_tokens, kind
     spent = Decimal("0")
     try:
@@ -204,7 +230,7 @@ def _call(interview, client, kind, prompt, max_tokens, effort, validate):
     except bakeoff.BakeoffError as exc:
         raise AnalystError(str(exc)) from exc
     finally:
-        if spent:
+        if spent and interview is not None:
             BrandInterview.objects.filter(pk=interview.pk).update(cost_usd=interview.cost_usd + spent)
             interview.cost_usd += spent
     if reply.finish_reason == "length" or not reply.text.strip():
@@ -493,3 +519,56 @@ def check_draft(draft: dict, starting_brief: str, founder_answers: str) -> dict:
             checks.append({"kind": "length", "text": f"The {field} is {words} words; aim for {limit} or fewer, "
                            "so it stays sharp in every prompt."})
     return dict(draft, brief=brief, checks=checks)
+
+
+
+# --- Open points: lines of the brief still marked "(To confirm)" ------------------
+
+OPEN_MARKER = "(To confirm)"
+
+
+def open_points(brief: BrandBrief) -> list:
+    """Each line of the brief text still marked "(To confirm)", with any options already suggested for it."""
+    points = []
+    for line in brief.text.splitlines():
+        if OPEN_MARKER.lower() in line.lower():
+            line = line.strip()
+            saved = OpenPointOptions.objects.filter(line=line).first()
+            points.append({"line": line, "options": saved.options if saved else [], "note": saved.note if saved else ""})
+    return points
+
+
+def suggest_options(line: str, client=None) -> OpenPointOptions:
+    """Ask the analyst for three or four complete replacements for one open line."""
+    line = line.strip()
+    brief = BrandBrief.current()
+    if line not in [l.strip() for l in brief.text.splitlines()]:
+        raise AnalystError("That line has changed since the page loaded. Reload the page and try again.")
+    prompt = prompts.render(prompts.BRAND_OPTIONS, line=line, brief=brief.prompt_text)
+    result, cost = _call(None, client or get_client(), "options", prompt, settings.FDW_ANALYST_TURN_TOKENS,
+                         settings.FDW_ANALYST_TURN_EFFORT, schemas.validate_open_point_options)
+    OpenPointOptions.objects.filter(line=line).delete()
+    return OpenPointOptions.objects.create(line=line, options=result["options"], note=result["note"], cost_usd=cost)
+
+
+def settle_point(line: str, new_text: str) -> BrandBrief:
+    """Replace one open line in the brief with the founder's chosen or written text."""
+    line, new_text = line.strip(), " ".join((new_text or "").split())
+    if not new_text:
+        raise AnalystError("Choose an option or write the line yourself.")
+    if OPEN_MARKER.lower() in new_text.lower():
+        raise AnalystError('Remove "(To confirm)" from the line once it is settled.')
+    with transaction.atomic():
+        brief = BrandBrief.current()
+        lines = brief.text.splitlines()
+        matches = [i for i, l in enumerate(lines) if l.strip() == line]
+        if not matches:
+            raise AnalystError("That line has changed since the page loaded. Reload the page and try again.")
+        brief.snapshot(BrandBriefVersion.Source.BEFORE, "Before settling an open point")
+        indent = lines[matches[0]][: len(lines[matches[0]]) - len(lines[matches[0]].lstrip())]
+        lines[matches[0]] = indent + new_text
+        brief.text = "\n".join(lines) + ("\n" if brief.text.endswith("\n") else "")
+        brief.save()
+        brief.snapshot(BrandBriefVersion.Source.HAND, f"Settled: {new_text[:150]}")
+        OpenPointOptions.objects.filter(line=line).delete()
+    return brief

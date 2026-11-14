@@ -459,6 +459,14 @@
     });
   }
 
+  // Open points: picking an option copies it into the box below, ready to edit.
+  document.querySelectorAll("[data-option-form]").forEach(function (form) {
+    var own = form.querySelector("textarea[name=own]");
+    form.querySelectorAll("input[name=choice]").forEach(function (radio) {
+      radio.addEventListener("change", function () { if (own) own.value = radio.value; });
+    });
+  });
+
   // Goal rows: "Add another goal" copies an empty row.
   document.querySelectorAll("[data-goal-rows]").forEach(function (set) {
     var add = set.querySelector("[data-add-goal]");

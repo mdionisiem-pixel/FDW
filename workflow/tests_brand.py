@@ -8,7 +8,7 @@ from django.urls import reverse
 
 from . import analyst, bakeoff, prompts, stages
 from .llm import DryRunClient
-from .models import (AnalystCall, BrandBrief, BrandBriefVersion, BrandInterview, Cycle, InterviewTurn,
+from .models import (AnalystCall, BrandBrief, BrandBriefVersion, BrandInterview, Cycle, InterviewTurn, OpenPointOptions,
                      ModelCall, RawItem)
 
 
@@ -568,3 +568,98 @@ class LineChangeTests(TestCase):
     def test_identical_texts_have_no_changes(self):
         from .views_brand import line_changes
         self.assertEqual(line_changes("A\nB", "A\nB"), [])
+
+
+OPTIONS = json.dumps({"options": [
+    {"label": "Undyed earth", "text": "Colour palette: Oat #D8CBB0, Undyed ecru #EDE6D6, Walnut #5C4632.",
+     "colours": [{"name": "Oat", "hex": "#d8cbb0"}, {"name": "Ecru", "hex": "#EDE6D6"}, {"name": "Bad", "hex": "brown"}]},
+    {"label": "Stone and flax", "text": "Colour palette: Flax #C9B48A, Stone #A39B8B, Charcoal wool #4A4744.", "colours": []},
+], "note": ""})
+PALETTE = "Colour palette (To confirm): named colours with hex values. Direction given by founder: natural undyed tones."
+
+
+@override_settings(FDW_DRY_RUN=False, FDW_OPTIONS_DAILY_LIMIT_USD=Decimal("1"))
+class OpenPointTests(TestCase):
+    def setUp(self):
+        brief = BrandBrief.current()
+        brief.text = "BRAND BRIEF\n" + PALETTE + "\nMaterials (To confirm): no synthetic fibres.\n\nHard rules:\n- Never use leather.\n"
+        brief.save()
+
+    def test_every_open_line_is_listed(self):
+        points = analyst.open_points(BrandBrief.current())
+        self.assertEqual([p["line"] for p in points], [PALETTE, "Materials (To confirm): no synthetic fibres."])
+
+    def test_options_are_suggested_for_one_line_with_valid_swatches_only(self):
+        client = ScriptedAnalyst(OPTIONS)
+        saved = analyst.suggest_options(PALETTE, client)
+        self.assertIn("natural undyed tones", client.calls[0]["prompt"])
+        self.assertIn("- Never use leather.", client.calls[0]["prompt"])
+        self.assertEqual(saved.options[0]["colours"], [{"name": "Oat", "hex": "#D8CBB0"}, {"name": "Ecru", "hex": "#EDE6D6"}])
+        self.assertEqual(analyst.open_points(BrandBrief.current())[0]["options"][1]["label"], "Stone and flax")
+        call = AnalystCall.objects.get()
+        self.assertEqual((call.kind, call.interview), ("options", None))
+
+    def test_an_option_that_keeps_the_marker_is_sent_back(self):
+        bad = json.dumps({"options": [{"label": "A", "text": "Colour palette (To confirm): oat."},
+                                      {"label": "B", "text": "Colour palette: stone."}]})
+        client = ScriptedAnalyst(bad, OPTIONS)
+        analyst.suggest_options(PALETTE, client)
+        self.assertIn("must not keep '(To confirm)'", client.calls[1]["prompt"])
+
+    def test_settling_replaces_only_that_line_and_keeps_a_version(self):
+        analyst.suggest_options(PALETTE, ScriptedAnalyst(OPTIONS))
+        analyst.settle_point(PALETTE, "Colour palette: Oat #D8CBB0, Undyed ecru #EDE6D6, Walnut #5C4632.")
+        text = BrandBrief.current().text
+        self.assertIn("Colour palette: Oat #D8CBB0, Undyed ecru #EDE6D6, Walnut #5C4632.", text)
+        self.assertNotIn(PALETTE, text)
+        self.assertIn("Materials (To confirm): no synthetic fibres.", text)
+        self.assertIn("- Never use leather.", text)
+        self.assertEqual(BrandBriefVersion.objects.filter(source=BrandBriefVersion.Source.BEFORE).count(), 1)
+        self.assertEqual(len(analyst.open_points(BrandBrief.current())), 1)
+        self.assertFalse(OpenPointOptions.objects.filter(line=PALETTE).exists())
+
+    def test_settling_refuses_the_marker_an_empty_line_and_a_changed_line(self):
+        for line, text, message in ((PALETTE, "Colour palette (To confirm): oat", "Remove"),
+                                    (PALETTE, "  ", "Choose an option"),
+                                    ("A line that is not there (To confirm)", "x", "changed")):
+            with self.assertRaisesMessage(analyst.AnalystError, message):
+                analyst.settle_point(line, text)
+
+    def test_the_daily_limit_stops_more_suggestions(self):
+        AnalystCall.objects.create(kind="options", model="m", prompt="p", cost_usd=Decimal("1.00"))
+        client = ScriptedAnalyst(OPTIONS)
+        with self.assertRaisesMessage(analyst.AnalystError, "FDW_OPTIONS_DAILY_LIMIT_USD"):
+            analyst.suggest_options(PALETTE, client)
+        self.assertEqual(client.calls, [])
+
+    def test_the_interview_asks_about_open_lines_with_concrete_choices(self):
+        self.assertIn('every line of the current brief still marked "(To confirm)"', prompts.BRAND_ANALYST)
+        self.assertIn("hex values", prompts.BRAND_ANALYST)
+
+
+@override_settings(FDW_DRY_RUN=True)
+class OpenPointPageTests(TestCase):
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
+        brief = BrandBrief.current()
+        brief.text = "BRAND BRIEF\n" + PALETTE + "\n"
+        brief.save()
+
+    def test_suggest_pick_and_settle_through_the_page(self):
+        page = self.client.get(reverse("brand_brief"))
+        self.assertContains(page, "Open points")
+        self.assertContains(page, "Suggest options")
+        self.client.post(reverse("brand_suggest_options"), {"line": PALETTE})
+        page = self.client.get(reverse("brand_brief"))
+        self.assertContains(page, "Sample direction 1")
+        self.assertContains(page, 'class="swatch" style="background: #D8CBB0"')
+        self.client.post(reverse("brand_settle_point"), {"line": PALETTE, "choice": "Colour palette: Oat #D8CBB0.", "own": ""})
+        self.assertIn("Colour palette: Oat #D8CBB0.", BrandBrief.current().text)
+        page = self.client.get(reverse("brand_brief"))
+        self.assertNotContains(page, "Open points")
+        self.assertContains(page, "All lines confirmed")
+
+    def test_your_own_wording_wins_over_the_picked_option(self):
+        self.client.post(reverse("brand_settle_point"), {"line": PALETTE, "choice": "Colour palette: Oat.",
+                                                          "own": "Colour palette: Oat #D8CBB0 and Walnut #5C4632."})
+        self.assertIn("Colour palette: Oat #D8CBB0 and Walnut #5C4632.", BrandBrief.current().text)
