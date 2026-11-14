@@ -1,0 +1,38 @@
+"""Guard: every place that waits on a model shows a working loader.
+
+A new model-calling form or loop added without one fails here, rather than
+leaving the founder looking at a page that seems frozen.
+"""
+import re
+from pathlib import Path
+
+from django.test import SimpleTestCase
+
+TEMPLATES = Path(__file__).parent / "templates" / "workflow"
+# Forms whose submit waits for a model or an outside service: they need data-working.
+FORM_ROUTES = ("run_stage1", "run_stage2", "run_stage3", "bakeoff_describe", "bakeoff_check_models")
+# Panels the page drives one request at a time: they need an in-panel loader.
+LOOP_ROUTES = ("visuals_next", "bakeoff_make_next", "bakeoff_reviewer_next")
+
+
+class LoaderCoverageTests(SimpleTestCase):
+    def sources(self):
+        return {p.name: p.read_text() for p in TEMPLATES.rglob("*.html")}
+
+    def test_every_model_form_shows_the_working_overlay(self):
+        found = set()
+        for name, text in self.sources().items():
+            for route in FORM_ROUTES:
+                for match in re.finditer(r"<(form|button)[^>]*\{% url '" + route + r"'[^>]*>", text):
+                    found.add(route)
+                    self.assertIn("data-working=", match.group(0), f"{name}: {route} has no working loader")
+        self.assertEqual(found, set(FORM_ROUTES))
+
+    def test_every_model_loop_has_an_in_panel_loader(self):
+        found = set()
+        for name, text in self.sources().items():
+            for route in LOOP_ROUTES:
+                for match in re.finditer(r"<div[^>]*data-url=\"\{% url '" + route + r"'[^\"]*\"[^>]*>(.{0,400})", text, re.S):
+                    found.add(route)
+                    self.assertIn('class="inline-working"', match.group(1), f"{name}: {route} has no loader")
+        self.assertEqual(found, set(LOOP_ROUTES))

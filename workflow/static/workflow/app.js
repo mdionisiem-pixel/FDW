@@ -30,6 +30,115 @@
     if (!found) showLoader("crochet");
   }
 
+  // A light line under every loader, changed every few seconds, so a long
+  // wait reads as work in progress rather than a frozen page. Decorative only:
+  // the real status is in the title and the progress line.
+  var QUIPS = {
+    research: [
+      "Reading the trend reports so you don't have to",
+      "Eavesdropping politely on the front row",
+      "Asking the internet what it wants to wear",
+      "Separating real demand from influencer noise",
+      "Counting how many times 'quiet luxury' was said",
+      "Checking every number has a source"
+    ],
+    design: [
+      "Sketching on the back of a napkin",
+      "Arguing about the palette",
+      "Pinning swatches to the mood board",
+      "Giving each collection a signature detail",
+      "Measuring twice, cutting once",
+      "The reviewer is being picky, as asked"
+    ],
+    sourcing: [
+      "Reading the suppliers' small print",
+      "Doing the margin maths with a sharp pencil",
+      "Checking who can actually knit this",
+      "Converting dollars without rounding in our favour",
+      "Asking whether four yarn colours is really enough"
+    ],
+    images: [
+      "Steaming out the creases before the shoot",
+      "Adjusting the studio lights",
+      "Asking the model to relax her shoulders",
+      "Holding the swatch next to the screen",
+      "The reviewer is counting stitches. Again.",
+      "Redrawing the cuff the reviewer did not like",
+      "Making sure nobody grew a sixth finger"
+    ],
+    review: [
+      "Putting on the reading glasses",
+      "Holding each image up to the window",
+      "Comparing notes with your scores",
+      "Squinting at the colour of that red",
+      "Being strict, as instructed"
+    ],
+    general: [
+      "Threading the needle",
+      "Untangling a stubborn knot",
+      "Pressing the seams flat",
+      "Finding the end of the yarn",
+      "Pinning the pattern in place"
+    ]
+  };
+  var QUIPS_BY_STEP = [
+    ["/stage-1/", "research"],
+    ["/stage-2/", "design"],
+    ["/stage-3/", "sourcing"],
+    ["/stage-4/", "images"],
+    ["/bakeoff/reviewer/", "review"],
+    ["/bakeoff/", "images"]
+  ];
+  function quipsFor(action) {
+    for (var i = 0; i < QUIPS_BY_STEP.length; i++) {
+      if (action.indexOf(QUIPS_BY_STEP[i][0]) !== -1) return QUIPS_BY_STEP[i][1];
+    }
+    return "general";
+  }
+  function startQuips(line, key) {
+    var list = QUIPS[key] || QUIPS.general;
+    var index = Math.floor(Math.random() * list.length);
+    var put = function () {
+      line.textContent = list[index % list.length] + "\u2026";
+      index += 1;
+    };
+    put();
+    var timer = setInterval(put, 4500);
+    return function () { clearInterval(timer); line.textContent = ""; };
+  }
+
+  // Loaders inside a panel, for work the page drives itself one request at a
+  // time (making and reviewing images), where a full-screen overlay would stop
+  // you reading the results as they arrive. Each copies one of the overlay's
+  // loaders, so they look and move the same.
+  function inlineLoader(panel) {
+    var box = panel && panel.querySelector(".inline-working");
+    if (!box) return { start: function () {}, stop: function () {} };
+    var stage = box.querySelector(".inline-loaders");
+    var line = box.querySelector(".working-quip");
+    var stopQuips = null;
+    return {
+      start: function () {
+        if (!stage.firstElementChild) {
+          var name = panel.getAttribute("data-loader") || "crochet";
+          var source = document.querySelector('#working .loader[data-loader="' + name + '"]') ||
+            document.querySelector('#working .loader[data-loader="crochet"]');
+          if (source) {
+            var copy = source.cloneNode(true);
+            copy.removeAttribute("hidden");
+            stage.appendChild(copy);
+          }
+        }
+        box.hidden = false;
+        if (!stopQuips) stopQuips = startQuips(line, panel.getAttribute("data-quips") || "general");
+      },
+      stop: function () {
+        box.hidden = true;
+        if (stopQuips) { stopQuips(); stopQuips = null; }
+      }
+    };
+  }
+
   // Build the repeated parts of two loaders once: the heart's X stitches and the chain loops.
   var SVG = "http://www.w3.org/2000/svg";
   var HEART = ["..XX.XX..", ".XXXXXXX.", ".XXXXXXX.", "..XXXXX..", "...XXX...", "....X...."];
@@ -125,6 +234,8 @@
       var action = (event.submitter && event.submitter.formAction) || form.action || "";
       showLoader((event.submitter && event.submitter.getAttribute("data-loader")) || form.getAttribute("data-loader") || loaderFor(action));
       overlay.hidden = false;
+      var quipLine = document.getElementById("working-quip");
+      if (quipLine) startQuips(quipLine, form.getAttribute("data-quips") || quipsFor(action));
       startProgress();
       form.querySelectorAll("button[type=submit]").forEach(function (button) {
         // Disable after the submit has been dispatched, so the form still posts.
@@ -179,12 +290,15 @@
   var makeButton = document.getElementById("make-button");
   if (make && makeButton) {
     var token = make.querySelector("input[name=csrfmiddlewaretoken]").value;
+    var makeLoader = inlineLoader(make);
+    var busyLabel = make.getAttribute("data-busy-label") || "Making images";
+    var doneWord = make.getAttribute("data-done-word") || "made";
     var fill = document.getElementById("make-fill");
     var status = document.getElementById("make-status");
     var show = function (p) {
       var finished = p.done + p.failed;
       fill.style.width = (p.total ? Math.round(finished / p.total * 100) : 0) + "%";
-      status.textContent = p.done + " made, " + p.failed + " failed, " + p.waiting + " waiting.";
+      status.textContent = p.done + " " + doneWord + ", " + p.failed + " failed, " + p.waiting + " waiting.";
     };
     var step = function () {
       fetch(make.getAttribute("data-url"), {
@@ -197,6 +311,7 @@
         if (result.body.progress) show(result.body.progress);
         if (!result.ok) {
           status.textContent = result.body.error || "Generation stopped.";
+          makeLoader.stop();
           makeButton.disabled = false;
           makeButton.textContent = "Continue";
           return;
@@ -209,13 +324,15 @@
         step();
       }).catch(function () {
         status.textContent = "The connection dropped. Press Continue to carry on; nothing made so far is lost.";
+        makeLoader.stop();
         makeButton.disabled = false;
         makeButton.textContent = "Continue";
       });
     };
     makeButton.addEventListener("click", function () {
       makeButton.disabled = true;
-      makeButton.textContent = "Making images";
+      makeButton.textContent = busyLabel;
+      makeLoader.start();
       step();
     });
   }
@@ -252,6 +369,7 @@
     var running = 0;
     var stopped = false;
     var stopMessage = "";
+    var visualLoader = inlineLoader(visualMake);
     var showVisual = function (p) {
       if (!p) return;
       vFill.style.width = (p.shots ? Math.round(p.resolved / p.shots * 100) : 0) + "%";
@@ -263,6 +381,7 @@
       if (message) vLast.textContent = message;
       if (running > 0) return;
       if (stopped) {
+        visualLoader.stop();
         vLast.textContent = stopMessage || "Stopped. Press Continue to carry on.";
         visualButton.disabled = false;
         visualButton.textContent = "Continue";
@@ -307,6 +426,7 @@
       visualButton.disabled = true;
       visualButton.textContent = "Making images";
       vLast.textContent = "Starting.";
+      visualLoader.start();
       stopped = false;
       stopMessage = "";
       for (var i = 0; i < workers; i += 1) {
