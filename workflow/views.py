@@ -38,6 +38,9 @@ CRITERION_LABELS = {
     "makeability": "Makeability",
     "price_fit": "Price fit",
     "spec_completeness": "Specification",
+    "desirability": "Desirability",
+    "range_variety": "Range variety",
+    "design_quality": "Design quality",
 }
 
 

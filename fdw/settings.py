@@ -140,10 +140,18 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # signal extraction is high-volume and simple, so it uses the small one.
 FDW_MODEL_WRITER = os.environ.get("FDW_MODEL_WRITER", "claude-sonnet-5-5")
 FDW_MODEL_EXTRACTOR = os.environ.get("FDW_MODEL_EXTRACTOR", "claude-haiku-5-5")
+# The model that plans, specifies and revises collections in stage 2. Set it to
+# claude-opus-5-5 for the strongest design judgement; it costs about twice as
+# much per call as Sonnet, so raise FDW_CYCLE_LIMIT_USD with it.
+FDW_MODEL_DESIGNER = os.environ.get("FDW_MODEL_DESIGNER", FDW_MODEL_WRITER)
+# A concept scoring below this on desirability, range variety or design quality
+# goes back to the designer once, with the creative review's reasons.
+FDW_DESIGN_MIN_SCORE = int(os.environ.get("FDW_DESIGN_MIN_SCORE", "4"))
 
 # US dollars per million tokens (input, output). Source: Claude pricing page,
 # read 12 November 2026. Update here when prices change.
 FDW_PRICES = {
+    "claude-opus-5-5": (Decimal("4"), Decimal("20")),  # read 14 November 2026
     "claude-sonnet-5-5": (Decimal("2"), Decimal("10")),
     "claude-haiku-5-5": (Decimal("0.10"), Decimal("0.50")),
 }

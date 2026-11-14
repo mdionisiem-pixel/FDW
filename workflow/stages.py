@@ -324,6 +324,7 @@ def decide_brief(brief: DemandBrief, decision: str, notes: str = "", user: str =
 def _review(cycle, concept_data, brand_brief, brief_text, client):
     prompt = prompts.render(
         prompts.REVIEW_CONCEPT,
+        design_standard=prompts.DESIGN_STANDARD,
         brand_brief=brand_brief,
         approved_demand_brief=brief_text,
         one_concept_json=json.dumps(concept_data, ensure_ascii=False, indent=1),
@@ -339,7 +340,23 @@ def _review(cycle, concept_data, brand_brief, brief_text, client):
     review["blocking_issues"] = [str(i) for i in review["blocking_issues"]] + code_issues
     if review["blocking_issues"] and review["overall"] == "recommend":
         review["overall"] = "revise"
+    review["design_issues"] = design_issues(review)
+    if review["design_issues"] and review["overall"] == "recommend":
+        review["overall"] = "revise"
     return review
+
+
+def design_issues(review) -> list:
+    """Creative scores below the bar, worded as issues for the designer to answer."""
+    minimum = settings.FDW_DESIGN_MIN_SCORE
+    issues = []
+    for criterion in schemas.DESIGN_CRITERIA:
+        score = review.get("scores", {}).get(criterion)
+        if isinstance(score, (int, float)) and score < minimum:
+            reason = str(review.get("reasons", {}).get(criterion, "")).strip() or "Below the design standard."
+            label = criterion.replace("_", " ")
+            issues.append(f"Design: {label} scored {score:g} of 5. {reason}")
+    return issues
 
 
 def run_stage2(cycle: Cycle, client=None) -> list:
@@ -356,6 +373,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
     # collections do not fit in one answer, and a cut-off answer saves nothing.
     plan_prompt = prompts.render(
         prompts.PLAN_CONCEPTS,
+        design_standard=prompts.DESIGN_STANDARD,
         brand_brief=brand_brief,
         approved_demand_brief=brief.text,
         founder_direction=_direction(cycle),
@@ -364,7 +382,7 @@ def run_stage2(cycle: Cycle, client=None) -> list:
         past_test_results=NO_PAST_RESULTS,
     )
     plans = run_json(
-        cycle, "plan_concepts", plan_prompt, settings.FDW_MODEL_WRITER,
+        cycle, "plan_concepts", plan_prompt, settings.FDW_MODEL_DESIGNER,
         settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_concept_plans, client,
     )
     # The three collections do not depend on each other, so each one is
@@ -372,29 +390,34 @@ def run_stage2(cycle: Cycle, client=None) -> list:
     def specify(plan):
         detail_prompt = prompts.render(
             prompts.DETAIL_CONCEPT,
+            design_standard=prompts.DESIGN_STANDARD,
             brand_brief=brand_brief,
             approved_demand_brief=brief.text,
             target_season=_target_season(cycle),
             concept_plan_json=json.dumps(plan, ensure_ascii=False, indent=1),
         )
         return run_json(
-            cycle, "detail_concept", detail_prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
+            cycle, "detail_concept", detail_prompt, settings.FDW_MODEL_DESIGNER, settings.FDW_MAX_OUTPUT_TOKENS,
             lambda data: schemas.validate_concept_against_plan(data, plan), client,
         )
 
     def review_and_revise(concept_data):
         reviews = [_review(cycle, concept_data, brand_brief, brief.text, client)]
         revisions = 0
-        while reviews[-1]["blocking_issues"] and revisions < MAX_CONCEPT_REVISIONS:
+        def issues_of(review):
+            return review["blocking_issues"] + review.get("design_issues", [])
+
+        while issues_of(reviews[-1]) and revisions < MAX_CONCEPT_REVISIONS:
             revise_prompt = prompts.render(
                 prompts.REVISE_CONCEPT,
+                design_standard=prompts.DESIGN_STANDARD,
                 brand_brief=brand_brief,
                 approved_demand_brief=brief.text,
                 one_concept_json=json.dumps(concept_data, ensure_ascii=False, indent=1),
-                issues="\n".join(f"- {issue}" for issue in reviews[-1]["blocking_issues"]),
+                issues="\n".join(f"- {issue}" for issue in issues_of(reviews[-1])),
             )
             revised = run_json(
-                cycle, "revise_concept", revise_prompt, settings.FDW_MODEL_WRITER,
+                cycle, "revise_concept", revise_prompt, settings.FDW_MODEL_DESIGNER,
                 settings.FDW_MAX_OUTPUT_TOKENS, schemas.validate_single_concept, client,
             )
             # The revision must stay the same concept, whatever the model returned.

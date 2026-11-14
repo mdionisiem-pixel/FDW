@@ -381,9 +381,9 @@ def _detail(prompt: str) -> str:
 
 
 SAMPLE_SCORES = {
-    "C1": ({"demand_evidence": 4, "coherence": 5, "uniqueness": 4, "makeability": 3, "price_fit": 4, "spec_completeness": 4}, "recommend"),
-    "C2": ({"demand_evidence": 3, "coherence": 5, "uniqueness": 4, "makeability": 4, "price_fit": 3, "spec_completeness": 4}, "recommend"),
-    "C3": ({"demand_evidence": 4, "coherence": 4, "uniqueness": 2, "makeability": 4, "price_fit": 4, "spec_completeness": 3}, "revise"),
+    "C1": ({"demand_evidence": 4, "coherence": 5, "uniqueness": 4, "makeability": 3, "price_fit": 4, "spec_completeness": 4, "desirability": 4, "range_variety": 4, "design_quality": 4}, "recommend"),
+    "C2": ({"demand_evidence": 3, "coherence": 5, "uniqueness": 4, "makeability": 4, "price_fit": 3, "spec_completeness": 4, "desirability": 4, "range_variety": 5, "design_quality": 4}, "recommend"),
+    "C3": ({"demand_evidence": 4, "coherence": 4, "uniqueness": 2, "makeability": 4, "price_fit": 4, "spec_completeness": 3, "desirability": 4, "range_variety": 4, "design_quality": 4}, "revise"),
 }
 
 

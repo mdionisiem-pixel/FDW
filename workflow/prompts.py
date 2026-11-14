@@ -183,6 +183,46 @@ Rules:
 {{past_test_results}}
 </past_results>"""
 
+DESIGN_STANDARD = """DESIGN STANDARD
+
+You design at the level of the best independent luxury labels built on craft: pieces a buyer stops for in a boutique, wants to touch, and can imagine wearing for years. A collection that is merely correct, makeable and on trend has failed this standard.
+
+Start from an idea, not a motif
+- Every collection begins with a point of view: a story, a feeling, a place, a craft tradition, an era, a work of art or architecture, something in nature. Name your references specifically (a region's darning tradition, a 1930s tailoring line, the way frost lies on a hedge), and translate them into form, texture and colour. Never copy a reference, and never copy another brand's piece.
+- The signature detail grows out of that idea. It is a means of expression, not a stamp.
+
+Build a range, not a set of copies
+- The hero piece carries the idea at full strength. It is the image the collection is remembered by, and it holds the most skill and labour.
+- Core pieces carry the idea quietly. They are the pieces a customer wears most, and each must be desirable on its own, not a basic with the motif added.
+- Accessories distil the idea into something small, giftable and affordable.
+- Use the signature detail at different strengths across the range: a statement on the hero, an echo on the core pieces (a smaller scale, a single placement, a change of colour or technique), a whisper on at least one piece (a trim, an edge, one line of stitches, the palette alone). Never put the same motif at the same scale in the same place on every piece. Repetition is not coherence; a shared point of view is.
+- Vary silhouette, length, volume, weight and texture across the range. Laid side by side, the pieces should look like a family, not like copies, and a buyer should be able to wear two of them together.
+
+Proportion, silhouette and restraint
+- Design for the body. Decide where the volume sits and where the line is clean, where the eye lands first, and how the piece moves when worn.
+- Each piece has one focal point. Everything else supports it.
+- Every detail must earn its place. When a piece feels finished, consider what to remove.
+
+Material, colour and finish
+- Luxury is felt before it is seen: fibre quality, hand feel, weight and drape, chosen for the season and for how the piece is worn.
+- Use the palette with intent: a lead colour, a supporting colour and an accent used sparingly. Decide each colour's share of each piece.
+- Finish is where luxury is proved: edges, seams, hems, closures, linings, trims in natural materials, and an inside as considered as the outside.
+
+Craft as the source of value
+- Where a piece is Atelier, make the hand visible and worth paying for: scale, placement and combinations of technique the buyer has not seen before. Never imitate craft with print.
+- Where a piece is made by a partner, design for what that partner does well, and let one Atelier element carry the craft signal if the price allows.
+
+Desirability test, applied to every piece
+- Can you say in one sentence why the target customer wants this piece at this price, and what they will wear it with? If not, redesign it.
+
+Things that fail this standard
+- A generic garment with the signature motif added to it.
+- The same detail on every piece.
+- A trend restated as a product, or a recognisable version of another brand's piece.
+- Overdesign: several competing details on one piece.
+- Novelty or costume that the target customer would not wear."""
+
+
 CONCEPT_STRUCTURE = """{
   "concept_id": "C1",
   "name": "",
@@ -211,7 +251,9 @@ PLAN_CONCEPTS = """You are the lead designer for Malina. The founder has approve
 
 This step is the plan only. For each concept decide the idea, the palette and the list of pieces. A second step will write the full specification of every piece, so keep each piece to one line here.
 
-What a collection is here: four to six pieces that clearly belong together through a shared theme, palette and signature detail. Each collection has one hero piece (the most distinctive, highest price), two or three core pieces, and one or two accessories at a lower price so new buyers have an entry point.
+What a collection is here: four to six pieces that clearly belong together through a shared idea, palette and signature detail. Each collection has one hero piece (the most distinctive, highest price), two or three core pieces, and one or two accessories at a lower price so new buyers have an entry point.
+
+Work as a creative director would. For each concept, first find the idea and its references. Then sketch at least eight piece ideas in your head and edit them down to the strongest four to six: cut anything generic, anything that repeats another piece, and anything that restates a trend. In each piece's idea, say how it carries the signature detail: statement, echo, whisper, or not at all. The range as a whole must follow the design standard below.
 
 These are new designs. The brief describes what people want; your job is to invent pieces that answer those wants in Malina's own way. Do not reproduce pieces Malina already makes, and do not restate a trend as a product.
 
@@ -225,6 +267,8 @@ Make the three concepts genuinely different from each other: different themes, a
 
 Design for luxury and uniqueness. Luxury here means material quality, finish and a detail a buyer has not seen elsewhere. Name that detail concretely. Avoid copying an identifiable piece from another brand; if a trend is driven by one, design a response to the underlying want, not a version of that piece.
 
+{{design_standard}}
+
 Choose a production route for every piece and price it to match:
 - atelier: made by hand by Malina. Low volume, highest price, may be called handmade.
 - on_demand: made one at a time by an on-demand supplier. Today these are mostly machine jacquard knits with a limited number of yarn colours. Suitable for accessible price points, not for luxury claims about handwork. A hand technique cannot use this route.
@@ -236,14 +280,14 @@ Return JSON only, with the three concepts numbered C1, C2 and C3 and pieces numb
     {
       "concept_id": "C1",
       "name": "",
-      "theme": "two or three sentences",
+      "theme": "two or three sentences: the idea and its named references",
       "target_customer": "who buys this and for what occasion",
-      "signature_detail": "the one detail that ties the pieces together",
+      "signature_detail": "the one detail that ties the pieces together, and how its strength varies across the range",
       "palette": [{"name": "", "hex": "#RRGGBB"}],
       "why_now": "the evidence, citing themes from the research brief",
       "basis": "what this concept rests on: web research, audience signals, the founder's direction, or a mix, with the evidence strength the brief gave",
       "pieces": [
-        {"piece_id": "C1-P1", "name": "", "role": "hero | core | accessory", "category": "", "technique": "", "production_route": "atelier | on_demand | specialist", "target_price_eur": 0, "idea": "one sentence on what makes this piece"}
+        {"piece_id": "C1-P1", "name": "", "role": "hero | core | accessory", "category": "", "technique": "", "production_route": "atelier | on_demand | specialist", "target_price_eur": 0, "idea": "one or two sentences: what makes this piece desirable, its silhouette, and how it carries the signature detail (statement, echo, whisper, or not at all)"}
       ]
     }
   ]
@@ -272,7 +316,13 @@ DETAIL_CONCEPT = """You are the lead designer for Malina. You have planned a col
 
 Keep the plan. Use the same concept_id, name, theme, palette and signature detail, and the same pieces with the same piece_id, name, role, production route and price. Do not add or remove pieces. If, while specifying a piece, you find that its route or price cannot be right, keep the plan's values and explain the problem in feasibility_notes; the reviewer and the founder decide what to change.
 
-Be physically specific. For every piece write a complete specification using the fields below. A maker should be able to start from it, and an image model should be able to draw it without guessing. Give real measurements in centimetres for a sample size, real stitch or fabric descriptions, how the piece is constructed, and each colour as a name with its hex value taken from the concept's palette. Every piece must carry the signature detail, and say where.
+Be physically specific. For every piece write a complete specification using the fields below. A maker should be able to start from it, and an image model should be able to draw it without guessing. Give real measurements in centimetres for a sample size, real stitch or fabric descriptions, how the piece is constructed, and each colour as a name with its hex value taken from the concept's palette.
+
+Carry the signature detail at the strength the plan gave each piece (statement, echo, whisper, or not at all), and state its exact size, placement and technique on that piece. Do not raise every piece to a statement: the variation is what makes the range.
+
+Specify as a luxury maker would: the silhouette and where its volume sits, the one focal point, the fibre and its hand feel, edges, seams, hems, closures, linings and trims in named materials, and the inside of the piece. These details are what the price buys and what the image model draws.
+
+{{design_standard}}
 
 Design for the target season: fibre, weight and construction must suit it.
 
@@ -300,17 +350,24 @@ REVIEW_CONCEPT = """You are reviewing one collection concept for Malina before t
 
 Score each criterion from 1 to 5 and give one sentence of reasoning that points at specific pieces.
 - demand_evidence: do the pieces answer themes that are actually in the research brief, and does the concept's basis state its evidence strength honestly? A concept built on an untested founder direction is acceptable if it says so; score it 3 for honesty, not 1. Check each cited theme exists there. A piece citing evidence that is not in the brief scores 1.
-- coherence: would a buyer see these as one collection?
+- coherence: would a buyer see these as one collection with one point of view? The same detail repeated on every piece is not coherence; score that 3 at most.
 - uniqueness: is the signature detail specific and unlikely to be found elsewhere?
 - makeability: could each piece be made by its chosen route with the materials and construction stated?
 - price_fit: does each price match its route, materials and role?
 - spec_completeness: could a maker and an image model work from each specification without guessing?
+- desirability: would the target customer stop for each piece in a luxury boutique, want to touch it, and pay its price? Name the weakest piece and why.
+- range_variety: do the pieces differ in silhouette, volume, weight, texture and in how strongly they carry the signature detail, so that they read as a family and not as copies? The same motif at the same scale on every piece scores 2 or lower.
+- design_quality: proportion, restraint, finish and originality, judged against the design standard below. A generic garment with a motif added scores 2 or lower; a range that would stand beside the best independent luxury craft labels scores 5.
 
 Then list:
 - blocking_issues: anything that must be fixed before prototyping, such as a missing measurement, a contradiction inside a specification, an unsupported claim, or a handmade claim on a non-atelier piece.
 - risks: what could go wrong in production or at the price test.
 
+Judge the three design criteria as an exacting creative director would. Scores of 3 or below on them send the concept back to the designer, so give a reason that says what to change, naming the pieces.
+
 Be direct. Do not soften a low score. Do not rewrite the concept. Return JSON: {"concept_id": "", "scores": {}, "reasons": {}, "blocking_issues": [], "risks": [], "overall": "recommend | revise | reject"}
+
+{{design_standard}}
 
 <brand_brief>
 {{brand_brief}}
@@ -324,7 +381,9 @@ Be direct. Do not soften a low score. Do not rewrite the concept. Return JSON: {
 
 REVISE_CONCEPT = """You are the lead designer for Malina. A reviewer checked one of your collection concepts and found issues that must be fixed before it can be prototyped. Correct the concept so that every issue is resolved.
 
-Change only what the issues require. Keep the concept_id, the theme and every piece that has no issue exactly as they are, because the founder will compare this concept with two others and unnecessary changes make that harder. If an issue says a technique cannot be made by its production route, change the route or the technique, and adjust the price to match the new route. If an issue is about a missing fact, add the fact; do not remove the piece to avoid the issue.
+Change only what the issues require. Keep the concept_id, the theme and every piece that has no issue exactly as they are, because the founder will compare this concept with two others and unnecessary changes make that harder. Issues marked "Design:" come from a creative review: answer them by redesigning the pieces they name, to the design standard below, not by adding detail or rewording; you may change a piece's silhouette, construction, surface detail or the strength of its signature detail, but keep its role, route and price unless the issue is about them.
+
+{{design_standard}} If an issue says a technique cannot be made by its production route, change the route or the technique, and adjust the price to match the new route. If an issue is about a missing fact, add the fact; do not remove the piece to avoid the issue.
 
 Return JSON only: the single corrected concept object, with this structure:
 """ + CONCEPT_STRUCTURE + """
