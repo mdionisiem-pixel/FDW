@@ -34,7 +34,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from . import prompts, schemas
-from .bakeoff import BakeoffError, get_image_client, sniff
+from .bakeoff import BakeoffError, BudgetBusy, get_image_client, sniff
 from .llm import SpendLimitError, StageError, get_client, run_json
 from .models import (
     SHOTS,
@@ -208,7 +208,13 @@ def work_next(cycle: Cycle, client=None, image_client=None) -> dict:
     if kind == "prompts":
         write_prompts(item, client)
         return {"state": "worked", "did": f"Wrote the shot prompts for {item.piece.name}."}
-    make_attempt(item, client, image_client)
+    try:
+        make_attempt(item, client, image_client)
+    except BudgetBusy:
+        # OpenRouter is holding credit for the images other workers are making.
+        # This worker steps back and tries again in a few seconds.
+        return {"state": "waiting", "did": "Waiting for OpenRouter: the images already being made are holding "
+                                           "your available credit. Nothing was charged."}
     item.refresh_from_db()
     outcome = "passed review" if item.status == ShotAttempt.Status.PASSED else "failed review"
     return {
@@ -367,6 +373,12 @@ def make_attempt(attempt: ShotAttempt, client=None, image_client=None) -> ShotAt
         started = time.monotonic()
         try:
             data, (media_type, ext), cost = image_client.generate(settings.FDW_IMAGE_MODEL, attempt.prompt, urls)
+        except BudgetBusy:
+            # Not this image's fault and nothing was charged: put it back in the queue untouched.
+            attempt.status = ShotAttempt.Status.WAITING
+            attempt.claimed_at = None
+            attempt.save(update_fields=["status", "claimed_at"])
+            raise
         except BakeoffError as exc:
             message = str(exc)[:2000]
             attempt.error = message

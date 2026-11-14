@@ -244,7 +244,7 @@ FDW_VISUAL_CALL_ESTIMATE_USD = Decimal(os.environ.get("FDW_VISUAL_CALL_ESTIMATE_
 FDW_MAX_SHOT_ATTEMPTS = int(os.environ.get("FDW_MAX_SHOT_ATTEMPTS", "3"))
 # How many images the page makes at the same time. Pieces do not depend on
 # each other, so several can be worked on at once.
-FDW_VISUAL_WORKERS = int(os.environ.get("FDW_VISUAL_WORKERS", "3"))
+FDW_VISUAL_WORKERS = int(os.environ.get("FDW_VISUAL_WORKERS", "2"))
 # Longest side, in pixels, of the images the reviewer looks at. Larger shows
 # more stitch detail and costs more per review.
 FDW_REVIEW_IMAGE_EDGE = int(os.environ.get("FDW_REVIEW_IMAGE_EDGE", "1568"))

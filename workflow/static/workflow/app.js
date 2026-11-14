@@ -292,7 +292,8 @@
           vLast.textContent = body.did;
           work();
         } else if (body.state === "waiting") {
-          window.setTimeout(work, 4000);
+          if (body.did) vLast.textContent = body.did;
+          window.setTimeout(work, 4000 + Math.floor(Math.random() * 3000));
         } else {
           workerDone();
         }

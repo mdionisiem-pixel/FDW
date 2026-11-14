@@ -99,7 +99,7 @@ test's spending limit.
 ## Visual prototypes (stage 4)
 
 After gate 3, press **Set up visual prototypes**, then **Make images**. The page makes
-several images at once (`FDW_VISUAL_WORKERS`, default 3); keep the tab open while it
+several images at once (`FDW_VISUAL_WORKERS`, default 2); keep the tab open while it
 runs. Closing it loses nothing; press the button again to carry on.
 
 For each piece kept at gate 3, Claude writes five shot prompts and a checklist from the
