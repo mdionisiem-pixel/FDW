@@ -459,12 +459,30 @@
     });
   }
 
-  // Open points: picking an option copies it into the box below, ready to edit.
+  // Open points: pick up to three options; the line to be saved is composed below, ready to edit.
+  // The composition matches the server's, so saving without editing gives the same line.
   document.querySelectorAll("[data-option-form]").forEach(function (form) {
     var own = form.querySelector("textarea[name=own]");
-    form.querySelectorAll("input[name=choice]").forEach(function (radio) {
-      radio.addEventListener("change", function () { if (own) own.value = radio.value; });
-    });
+    var max = parseInt(form.getAttribute("data-max"), 10) || 3;
+    var error = form.querySelector("[data-choice-error]");
+    var boxes = form.querySelectorAll("input[name=choice]");
+    var compose = function () {
+      var chosen = Array.prototype.filter.call(boxes, function (b) { return b.checked; });
+      boxes.forEach(function (b) { b.disabled = !b.checked && chosen.length >= max; });
+      if (error) error.hidden = chosen.length < max;
+      if (error && chosen.length >= max) error.textContent = "That is the most you can combine. Untick one to choose another.";
+      if (!chosen.length) { own.value = ""; return; }
+      if (chosen.length === 1) { own.value = chosen[0].value; return; }
+      var first = chosen[0].value;
+      var subject = first.indexOf(":") > -1 ? first.split(":")[0].trim() : first;
+      var parts = chosen.map(function (b) {
+        var text = b.value;
+        var body = text.indexOf(":") > -1 ? text.slice(text.indexOf(":") + 1).trim() : text;
+        return b.getAttribute("data-label") + ": " + body.replace(/\.+$/, "");
+      });
+      own.value = subject + ", " + chosen.length + " combined directions. " + parts.join(" | ") + ".";
+    };
+    boxes.forEach(function (b) { b.addEventListener("change", compose); });
   });
 
   // Goal rows: "Add another goal" copies an empty row.

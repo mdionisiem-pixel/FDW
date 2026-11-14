@@ -41,6 +41,8 @@ def brand_brief(request):
         ],
         "interview": analyst.current_interview(),
         "open_points": analyst.open_points(brief),
+        "reworkable": analyst.reworkable_lines(brief),
+        "max_choices": analyst.MAX_CHOICES,
         "versions": BrandBriefVersion.objects.all()[:12],
         "analyst_model": settings.FDW_MODEL_ANALYST,
         "dry_run": settings.FDW_DRY_RUN,
@@ -60,14 +62,26 @@ def suggest_options(request):
 @login_required
 @require_POST
 def settle_point(request):
-    """The founder's own wording wins over a picked option, since it may be an edited copy of one."""
-    text = request.POST.get("own", "").strip() or request.POST.get("choice", "")
+    """The founder's own wording wins over picked options, since it is usually an edited combination of them."""
+    line = request.POST.get("line", "")
+    chosen = request.POST.getlist("choice")
+    if len(chosen) > analyst.MAX_CHOICES:
+        messages.error(request, f"Choose at most {analyst.MAX_CHOICES} options.")
+        return redirect(reverse("brand_brief") + "#open-points")
+    text = request.POST.get("own", "").strip() or analyst.combine_options(line, chosen)
     try:
-        analyst.settle_point(request.POST.get("line", ""), text)
+        analyst.settle_point(line, text)
     except analyst.AnalystError as exc:
         messages.error(request, str(exc))
     else:
         messages.success(request, "Settled. The new line applies to every stage run from now on.")
+    return redirect(reverse("brand_brief") + "#open-points")
+
+
+@login_required
+@require_POST
+def stop_rework(request):
+    analyst.stop_rework(request.POST.get("line", ""))
     return redirect(reverse("brand_brief") + "#open-points")
 
 
