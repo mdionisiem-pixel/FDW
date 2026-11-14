@@ -780,3 +780,11 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .reviewer-item p { margin: 0 0 0.3rem; }
 .reviewer-check-line { margin-top: 0.5rem; }
 .reviewer-check-line.state-ready { color: var(--moss); }
+
+/* Rotating captions and in-panel loaders */
+.working-quip { margin: 0 0 0.5rem; min-height: 1.4em; color: var(--floss-deep); font-style: italic; font-size: 0.95rem; }
+.inline-working { margin: 0.75rem 0; }
+.inline-working[hidden] { display: none; }
+.inline-loaders { height: 120px; max-width: 26rem; }
+.inline-loaders .loader { max-height: 104px; width: auto; }
+.inline-working .working-quip { margin-top: 0.5rem; }
