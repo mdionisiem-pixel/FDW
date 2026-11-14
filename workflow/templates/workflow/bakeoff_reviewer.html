@@ -1,0 +1,83 @@
+{% extends "workflow/base.html" %}
+{% load workflow_extras %}
+{% block title %}Reviewer check | Malina studio{% endblock %}
+{% block content %}
+<section class="page">
+  {% include "workflow/includes/tools_tabs.html" %}
+  <div class="page-head">
+    <div>
+      <h1>Reviewer check</h1>
+      <p class="lede">In stage 4, a Claude reviewer fails any image that does not match the piece before you see it. This check runs that same reviewer, with the same instructions, on images you have already scored, and shows where it disagrees with you.</p>
+    </div>
+    <div class="spend" aria-label="Spend on tools">
+      <p class="spend-figure">${{ spent|floatformat:2 }} <span>of ${{ limit|floatformat:2 }} limit</span></p>
+      <p class="meta">Shared with the image model test.</p>
+    </div>
+  </div>
+
+  <div class="stage">
+    <h2>How your scores are read</h2>
+    <p class="stage-intro">An image counts as one you would accept when all four of your scores are {{ accept_score }} or higher; anything lower, as one you would reject. The number that matters most is how many images you would reject the reviewer also fails, because a missed one reaches buyers. Failing a good image only costs a redraw.</p>
+    <form method="post" action="{% url 'bakeoff_reviewer_start' %}" class="run-row">
+      {% csrf_token %}
+      <button class="btn{% if not run %} btn-primary{% endif %}" type="submit" {% if not scored_count %}disabled{% endif %}>{% if run %}Start a new check{% else %}Start the check{% endif %}</button>
+      <p class="meta">{{ scored_count }} scored image{{ scored_count|pluralize }}, {{ would_reject }} of them ones you would reject. About ${{ estimate|floatformat:2 }}.{% if run %} Earlier checks stay in the record.{% endif %}</p>
+    </form>
+  </div>
+
+  {% if run %}
+    <div class="stage">
+      <h2>Check of {{ run.created_at|date:"j M Y, H:i" }}</h2>
+      {% if progress.waiting %}
+        <div class="make" id="make" data-url="{% url 'bakeoff_reviewer_next' %}">
+          <div class="spend-track make-track" role="progressbar" aria-label="Images reviewed" aria-valuemin="0" aria-valuemax="{{ progress.total }}" aria-valuenow="{{ progress.done|add:progress.failed }}">
+            <div class="spend-fill" id="make-fill" style="width: {% widthratio progress.done|add:progress.failed progress.total 100 %}%"></div>
+          </div>
+          <p class="meta" id="make-status">{{ progress.done }} made, {{ progress.failed }} failed, {{ progress.waiting }} waiting.</p>
+          {% csrf_token %}
+          <button class="btn btn-primary" type="button" id="make-button">Run the check</button>
+        </div>
+      {% endif %}
+
+      {% if info.reviewed %}
+        {% if not info.current %}
+          <aside class="callout"><p><strong>The reviewer has changed since this check.</strong> Its instructions or model are different now, so these results describe the old reviewer. Start a new check.</p></aside>
+        {% endif %}
+        <div class="reviewer-verdict verdict-{{ info.state }}">
+          <p class="stamp {% if info.state == 'ready' %}stamp-approved{% elif info.state == 'not_ready' %}stamp-rejected{% else %}stamp-pending{% endif %}">{% if info.state == 'ready' %}Reviewer can be relied on{% elif info.state == 'not_ready' %}Reviewer misses flawed images{% else %}Not enough evidence yet{% endif %}</p>
+          <p>{{ info.reason }}</p>
+        </div>
+        <dl class="sourcing-facts reviewer-facts">
+          <div><dt>Images you would reject, caught</dt><dd><strong>{{ info.caught }} of {{ info.rejected }}</strong>{% if info.catch_percent is not None %} ({{ info.catch_percent }}%, target {{ info.target_percent }}%){% endif %}</dd></div>
+          <div><dt>Images you would accept, passed</dt><dd>{{ info.passed_good }} of {{ info.accepted }}{% if info.pass_percent is not None %} ({{ info.pass_percent }}%){% endif %}</dd></div>
+          <div><dt>Missed: flawed images it passed</dt><dd><strong class="{% if info.missed %}low{% endif %}">{{ info.missed|length }}</strong></dd></div>
+          <div><dt>Good images it failed</dt><dd>{{ info.extra_fails|length }}</dd></div>
+        </dl>
+
+        <h3>Image by image</h3>
+        <p class="meta">Disagreements first. The model names stay hidden.</p>
+        <ol class="reviewer-list">
+          {% for r in results %}
+            <li class="reviewer-item {% if r.agrees is False %}disagree{% endif %}">
+              <img src="{% url 'bakeoff_image' r.image.pk %}" alt="Image {{ r.image.code }}, {{ r.image.get_shot_display|lower }} of {{ r.image.piece.name }}" loading="lazy">
+              <div>
+                <p><strong>{{ r.image.piece.name }}, {{ r.image.get_shot_display|lower }}</strong> <span class="meta">image {{ r.image.code }}</span></p>
+                <p>You: <strong>{% if r.founder_accepts %}accept{% else %}reject{% endif %}</strong> <span class="meta">(scores {{ r.image.matches_piece }}, {{ r.image.material_realism }}, {{ r.image.colour_accuracy }}, {{ r.image.photo_realism }})</span>
+                · Reviewer: {% if r.verdict %}<strong>{% if r.verdict == 'pass' %}pass{% else %}fail{% endif %}</strong>{% elif r.error %}<span class="failed">{{ r.error|truncatechars:120 }}</span>{% else %}<span class="meta">waiting</span>{% endif %}
+                {% if r.agrees is False %}{% if r.founder_accepts %}<span class="verdict verdict-revise">Failed a good image</span>{% else %}<span class="verdict verdict-reject">Missed a flawed image</span>{% endif %}{% endif %}</p>
+                {% if r.review %}
+                  <details class="fold"><summary>Reviewer notes</summary>
+                    <ul class="checklist">{% for c in r.review.checklist_results %}<li class="check-{{ c.result }}">{{ c.fact }}{% if c.result != 'match' %} <span class="meta">({{ c.result|label }}: {{ c.observed }})</span>{% endif %}</li>{% endfor %}</ul>
+                    {% for i in r.review.realism_issues %}<p class="meta">Realism: {{ i }}</p>{% endfor %}
+                    {% if r.review.correction_note %}<p class="meta">Correction: {{ r.review.correction_note }}</p>{% endif %}
+                  </details>
+                {% endif %}
+              </div>
+            </li>
+          {% endfor %}
+        </ol>
+      {% endif %}
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -11,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from . import charts, stages, visuals
+from . import charts, reviewer_check, stages, visuals
 from .llm import StageError
 from .models import (
     BrandBrief, Concept, Cycle, DemandBrief, PieceVisuals, RawItem, ShotAttempt, SourcingCheck, SourcingResult,
@@ -321,6 +321,7 @@ def _visuals_context(cycle):
         "max_attempts": settings.FDW_MAX_SHOT_ATTEMPTS,
         "visual_workers": max(1, settings.FDW_VISUAL_WORKERS),
         "concept_label": visuals.CONCEPT_LABEL,
+        "reviewer_status": reviewer_check.status_line() if sets or cycle.status == Cycle.Status.SOURCING_APPROVED else None,
         "has_open_work": any(v.status in (PieceVisuals.Status.WRITING, PieceVisuals.Status.MAKING) for v in sets),
     }
 

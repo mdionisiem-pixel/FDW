@@ -248,3 +248,15 @@ FDW_VISUAL_WORKERS = int(os.environ.get("FDW_VISUAL_WORKERS", "3"))
 # Longest side, in pixels, of the images the reviewer looks at. Larger shows
 # more stitch detail and costs more per review.
 FDW_REVIEW_IMAGE_EDGE = int(os.environ.get("FDW_REVIEW_IMAGE_EDGE", "1568"))
+
+# --- Reviewer check (Tools page) ---------------------------------------------------
+
+# An image the founder scored at least this on all four points counts as one
+# they would accept; anything lower, as one they would reject.
+FDW_REVIEWER_ACCEPT_SCORE = int(os.environ.get("FDW_REVIEWER_ACCEPT_SCORE", "4"))
+# The reviewer is trusted once it has been tested on at least this many images
+# the founder rejected, and failed at least this share of them. From the
+# workflow specification: about 30 scored images, half of them rejected, and
+# at least 9 in 10 rejected images caught.
+FDW_REVIEWER_MIN_REJECTED = int(os.environ.get("FDW_REVIEWER_MIN_REJECTED", "15"))
+FDW_REVIEWER_TARGET_CATCH = Decimal(os.environ.get("FDW_REVIEWER_TARGET_CATCH", "0.9"))

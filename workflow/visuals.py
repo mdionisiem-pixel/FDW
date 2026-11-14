@@ -415,43 +415,63 @@ def make_attempt(attempt: ShotAttempt, client=None, image_client=None) -> ShotAt
     return attempt
 
 
+def review_payload(field_file) -> tuple:
+    """An image as the reviewer sees it: JPEG, scaled to FDW_REVIEW_IMAGE_EDGE."""
+    jpeg = _as_jpeg(_read(field_file), settings.FDW_REVIEW_IMAGE_EDGE, 88)
+    return ("image/jpeg", base64.b64encode(jpeg).decode("ascii"))
+
+
+def review_prompt(spec, accepted_changes, checklist, shot: str, reference_shots, earlier_notes=()) -> str:
+    """The stage 4 reviewer's prompt. The reviewer check on the Tools page uses the same function,
+    so what it measures is exactly what stage 4 runs."""
+    if reference_shots:
+        names = ", ".join(f"shot {code} ({SHOT_NAMES[code].lower()})" for code in reference_shots)
+        count = len(reference_shots)
+        reference_note = (
+            f"The {'next image is' if count == 1 else f'next {count} images are'} the approved "
+            f"reference {'image' if count == 1 else 'images'} the image model was given, in this order: "
+            f"{names}. The image under review must show the same piece."
+        )
+    else:
+        reference_note = "This shot has no reference image; judge it against the specification alone."
+    earlier_text = (
+        "Earlier attempts at this shot failed review for the reasons below. Check specifically that each "
+        "one is now fixed, as well as everything else:\n" + _bullets(earlier_notes, "")
+    ) if earlier_notes else ""
+    return prompts.render(
+        prompts.VISUAL_REVIEWER,
+        reference_note=reference_note,
+        earlier_corrections=earlier_text,
+        realism_standard=prompts.REALISM_STANDARD,
+        piece_json=json.dumps(spec, ensure_ascii=False, indent=1),
+        accepted_changes=_bullets(accepted_changes, "None."),
+        reviewer_checklist=_bullets(checklist, "None."),
+        shot=shot,
+        shot_name=SHOT_NAMES[shot],
+    )
+
+
+def reviewer_version() -> str:
+    """Changes whenever the reviewer's prompt, realism standard or model changes."""
+    import hashlib
+
+    text = prompts.VISUAL_REVIEWER + prompts.REALISM_STANDARD + settings.FDW_MODEL_WRITER
+    return hashlib.sha256(text.encode()).hexdigest()[:10]
+
+
 def review_attempt(attempt: ShotAttempt, client) -> dict:
     visuals = attempt.visuals
     refs = sorted(ShotAttempt.objects.filter(pk__in=attempt.references), key=lambda a: a.shot)
     images = []
     if not getattr(client, "dry_run", False) and _is_raster(attempt.file):
-        edge = settings.FDW_REVIEW_IMAGE_EDGE
-        for item in [attempt] + [r for r in refs if _is_raster(r.file)]:
-            images.append(("image/jpeg", base64.b64encode(_as_jpeg(_read(item.file), edge, 88)).decode("ascii")))
-    if refs:
-        names = ", ".join(f"shot {r.shot} ({SHOT_NAMES[r.shot].lower()})" for r in refs)
-        reference_note = (
-            f"The {'next image is' if len(refs) == 1 else f'next {len(refs)} images are'} the approved "
-            f"reference {'image' if len(refs) == 1 else 'images'} the image model was given, in this order: "
-            f"{names}. The image under review must show the same piece."
-        )
-    else:
-        reference_note = "This shot has no reference image; judge it against the specification alone."
+        images = [review_payload(item.file) for item in [attempt] + [r for r in refs if _is_raster(r.file)]]
     earlier = [
         a.correction_note for a in visuals.current_attempts().filter(
             shot=attempt.shot, attempt__lt=attempt.attempt, status=ShotAttempt.Status.FAILED
         ).order_by("attempt") if a.correction_note
     ]
-    earlier_text = (
-        "Earlier attempts at this shot failed review for the reasons below. Check specifically that each "
-        "one is now fixed, as well as everything else:\n" + _bullets(earlier, "")
-    ) if earlier else ""
-    prompt = prompts.render(
-        prompts.VISUAL_REVIEWER,
-        reference_note=reference_note,
-        earlier_corrections=earlier_text,
-        realism_standard=prompts.REALISM_STANDARD,
-        piece_json=json.dumps(visuals.piece.spec, ensure_ascii=False, indent=1),
-        accepted_changes=_bullets(visuals.accepted_changes, "None."),
-        reviewer_checklist=_bullets(visuals.checklist, "None."),
-        shot=attempt.shot,
-        shot_name=SHOT_NAMES[attempt.shot],
-    )
+    prompt = review_prompt(visuals.piece.spec, visuals.accepted_changes, visuals.checklist,
+                           attempt.shot, [r.shot for r in refs], earlier)
     return run_json(
         visuals.cycle, "visual_review", prompt, settings.FDW_MODEL_WRITER, settings.FDW_MAX_OUTPUT_TOKENS,
         schemas.validate_image_review, client, images=images,

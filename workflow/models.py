@@ -695,3 +695,56 @@ class ShotAttempt(models.Model):
     def mismatches(self) -> int:
         results = (self.review or {}).get("checklist_results") or []
         return sum(1 for r in results if r.get("result") == "mismatch")
+
+
+# --- Reviewer check: does the stage 4 reviewer judge like the founder? -----------
+
+
+class ReviewerRun(models.Model):
+    """One run of the stage 4 image reviewer over images the founder has scored in the image test."""
+
+    model = models.CharField(max_length=60)
+    # Short hash of the reviewer prompt, realism standard and model, so a run
+    # can be matched to the reviewer it measured.
+    version = models.CharField(max_length=16)
+    accept_score = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"Reviewer check {self.created_at:%d %b %Y %H:%M}"
+
+
+class ReviewerResult(models.Model):
+    class Status(models.TextChoices):
+        WAITING = "waiting", "Waiting"
+        RUNNING = "running", "Being reviewed"
+        DONE = "done", "Reviewed"
+        FAILED = "failed", "Failed"
+
+    run = models.ForeignKey(ReviewerRun, on_delete=models.CASCADE, related_name="results")
+    image = models.ForeignKey(BakeoffImage, on_delete=models.CASCADE, related_name="reviewer_results")
+    # The founder's call at the time of the run: would they accept this image?
+    founder_accepts = models.BooleanField()
+    status = models.CharField(max_length=8, choices=Status.choices, default=Status.WAITING)
+    verdict = models.CharField(max_length=4, blank=True)
+    review = models.JSONField(null=True, blank=True)
+    cost_usd = models.DecimalField(max_digits=10, decimal_places=4, default=Decimal("0"))
+    error = models.TextField(blank=True)
+    claimed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["image__piece_id", "image__shot", "image__code"]
+        constraints = [
+            models.UniqueConstraint(fields=["run", "image"], name="one_result_per_image_per_run"),
+        ]
+
+    @property
+    def reviewer_accepts(self):
+        return None if not self.verdict else self.verdict == "pass"
+
+    @property
+    def agrees(self):
+        return None if not self.verdict else self.reviewer_accepts == self.founder_accepts

@@ -553,6 +553,6 @@ def respond(step: str, prompt: str) -> str:
         return _sourcing(prompt)
     if base == "visual_art_direction":
         return _art_direction(prompt)
-    if base == "visual_review":
+    if base in ("visual_review", "reviewer_check"):
         return _image_review(prompt)
     raise ValueError(f"No dry-run response is defined for step '{step}'.")
