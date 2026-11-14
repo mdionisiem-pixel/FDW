@@ -335,3 +335,111 @@ class ParallelFinishTests(TransactionTestCase):
         self.assertEqual(ModelCall.objects.filter(cycle__is_test=True, reused=True).count(), 8)
         self.assertEqual(test.cycle_a.concepts.count(), 3)
         self.assertEqual(test.cycle_b.concepts.count(), 3)
+
+
+@override_settings(FDW_DRY_RUN=True, FDW_BRIEF_TEST_LIMIT_USD=Decimal("12"), FDW_BRIEF_TEST_STALE_MINUTES=45)
+class RunningStateTests(TestCase):
+    """One run at a time, a stuck run can be taken over, and the status comes from what was saved."""
+
+    def setUp(self):
+        self.cycle = approved_cycle()
+        self.version = earlier_version()
+
+    def stopped_test(self):
+        test = brief_test.create(self.cycle, self.version)
+        brief_test.run(test, OutOfCredit(calls_allowed=5))
+        test.refresh_from_db()
+        return test
+
+    def test_a_second_finish_while_one_runs_is_refused(self):
+        test = self.stopped_test()
+        from django.utils import timezone
+        BriefTest.objects.filter(pk=test.pk).update(status=BriefTest.Status.RUNNING, started_at=timezone.now())
+        test.refresh_from_db()
+        self.assertFalse(brief_test.can_finish(test))
+        with self.assertRaisesMessage(brief_test.BriefTestError, "already running"):
+            brief_test.finish(test, DryRunClient())
+
+    def test_a_stuck_run_can_be_finished_and_its_late_result_is_ignored(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        test = self.stopped_test()
+        stuck_since = timezone.now() - timedelta(minutes=60)
+        BriefTest.objects.filter(pk=test.pk).update(status=BriefTest.Status.RUNNING, started_at=stuck_since)
+        stuck = BriefTest.objects.get(pk=test.pk)  # the stuck request's own copy
+        test.refresh_from_db()
+        self.assertTrue(brief_test.can_finish(test))
+        brief_test.finish(test, DryRunClient())
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.DONE)
+        # The stuck request finally gives up and tries to write its failure: nothing changes.
+        BriefTest.objects.filter(pk=stuck.pk, status=BriefTest.Status.RUNNING,
+                                 started_at=stuck.started_at).update(status=BriefTest.Status.FAILED,
+                                                                     error="Run B: The read operation timed out")
+        brief_test._run_copies(stuck, DryRunClient())
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.DONE)
+        self.assertEqual(test.error, "")
+
+    def test_a_test_interrupted_before_it_recorded_anything_can_be_finished(self):
+        test = self.stopped_test()
+        BriefTest.objects.filter(pk=test.pk).update(status=BriefTest.Status.READY, started_at=None)
+        test.refresh_from_db()
+        self.assertTrue(brief_test.can_finish(test))
+        brief_test.finish(test, DryRunClient())
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.DONE)
+
+    def test_a_run_that_saved_no_concepts_is_never_called_done(self):
+        from . import stages
+        test = brief_test.create(self.cycle, self.version)
+        original = stages.run_stage2
+
+        def silently_saves_nothing(cycle, client=None, brand_brief=None):
+            if brand_brief == test.brief_a:
+                return  # no error, but no concepts either
+            return original(cycle, client=client, brand_brief=brand_brief)
+
+        stages.run_stage2 = silently_saves_nothing
+        try:
+            brief_test.run(test, DryRunClient())
+        finally:
+            stages.run_stage2 = original
+        test.refresh_from_db()
+        self.assertEqual(test.status, BriefTest.Status.FAILED)
+        self.assertIn("Run A: it produced no concepts", test.error)
+
+    def test_the_page_says_a_running_test_is_running(self):
+        from django.utils import timezone
+        self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
+        test = self.stopped_test()
+        BriefTest.objects.filter(pk=test.pk).update(status=BriefTest.Status.RUNNING, started_at=timezone.now())
+        page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk]))
+        self.assertContains(page, "Running since")
+        self.assertNotContains(page, "Finish the test")
+
+    def test_a_test_that_never_started_says_so(self):
+        self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
+        test = brief_test.create(self.cycle, self.version)
+        page = self.client.get(reverse("bakeoff_brief_test_detail", args=[test.pk]))
+        self.assertContains(page, "This test never started")
+
+
+class RawTimeoutTests(TestCase):
+    """A read timeout mid-stream is a failed call like any other, not an unlogged crash."""
+
+    @override_settings(ANTHROPIC_API_KEY="test-key")
+    def test_a_raw_timeout_becomes_a_stage_error(self):
+        from .llm import AnthropicClient, StageError
+
+        class Stream:
+            def __enter__(self):
+                raise TimeoutError("The read operation timed out")
+
+            def __exit__(self, *exc):
+                return False
+
+        client = AnthropicClient()
+        client._client.messages.stream = lambda **kwargs: Stream()
+        with self.assertRaisesMessage(StageError, "The read operation timed out"):
+            client.complete("revise_concept", "prompt", "claude-opus-5-5", 100)

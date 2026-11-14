@@ -9,11 +9,13 @@ the page say which brief made which, and show the app's own checks.
 import random
 import re
 import threading
+from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
 from django.db import connection, transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
+from django.utils import timezone
 
 from . import stages
 from .models import (BrandBrief, BrandBriefVersion, BriefTest, Cycle, DemandBrief, ModelCall,
@@ -101,15 +103,51 @@ def _copy(source: Cycle, letter: str) -> Cycle:
     return cycle
 
 
+def is_stale(test: BriefTest) -> bool:
+    """A run that has gone on far longer than stage 2 ever takes has stopped."""
+    if test.status != BriefTest.Status.RUNNING or test.started_at is None:
+        return False
+    return timezone.now() - test.started_at > timedelta(minutes=settings.FDW_BRIEF_TEST_STALE_MINUTES)
+
+
+def can_finish(test: BriefTest) -> bool:
+    """Failed, stuck, or started and never recorded (an older test interrupted before
+    the running state existed): all can be finished on the copies already made."""
+    if test.status == BriefTest.Status.FAILED or is_stale(test):
+        return True
+    return test.status == BriefTest.Status.READY and (test.cycle_a_id or test.cycle_b_id) is not None
+
+
+def _claim(test: BriefTest, *, finishing: bool) -> None:
+    """Mark the test as running, in one database update, so two requests can never
+    run it at once. A stuck run can be taken over once it is stale."""
+    now = timezone.now()
+    if finishing:
+        allowed = Q(status=BriefTest.Status.FAILED) | Q(
+            status=BriefTest.Status.READY) & (Q(cycle_a__isnull=False) | Q(cycle_b__isnull=False))
+        stale_before = now - timedelta(minutes=settings.FDW_BRIEF_TEST_STALE_MINUTES)
+        allowed |= Q(status=BriefTest.Status.RUNNING, started_at__lt=stale_before)
+    else:
+        allowed = Q(status=BriefTest.Status.READY, cycle_a__isnull=True, cycle_b__isnull=True)
+    claimed = BriefTest.objects.filter(allowed, pk=test.pk).update(
+        status=BriefTest.Status.RUNNING, started_at=now, error="")
+    test.refresh_from_db()
+    if not claimed:
+        if test.status == BriefTest.Status.RUNNING:
+            raise BriefTestError("This test is already running. Reload the page in a few minutes.")
+        if finishing:
+            raise BriefTestError("Only a test that stopped part-way can be finished.")
+        raise BriefTestError("This test has already run.")
+
+
 def run(test: BriefTest, client=None) -> BriefTest:
     """Run stage 2 on both copies at the same time and keep whatever each produced."""
-    if test.status != BriefTest.Status.READY:
-        raise BriefTestError("This test has already run.")
+    _claim(test, finishing=False)
     with transaction.atomic():
         test.cycle_a = _copy(test.source_cycle, "A")
         test.cycle_b = _copy(test.source_cycle, "B")
         test.save(update_fields=["cycle_a", "cycle_b"])
-    return _run_copies(test, [("A", test.cycle_a, test.brief_a), ("B", test.cycle_b, test.brief_b)], client)
+    return _run_copies(test, client)
 
 
 def finish(test: BriefTest, client=None) -> BriefTest:
@@ -117,22 +155,30 @@ def finish(test: BriefTest, client=None) -> BriefTest:
 
     Every answer already paid for is reused (see llm._earlier_answer), so only
     the steps that never finished cost money. A run that did finish is left as it is."""
-    if test.status != BriefTest.Status.FAILED or test.cycle_a is None or test.cycle_b is None:
-        raise BriefTestError("Only a test that stopped part-way can be finished.")
-    todo = [(letter, cycle, text) for letter, cycle, text in
-            (("A", test.cycle_a, test.brief_a), ("B", test.cycle_b, test.brief_b)) if not cycle.concepts.exists()]
-    test.error = ""
-    return _run_copies(test, todo, client)
+    _claim(test, finishing=True)
+    with transaction.atomic():
+        for letter in ("A", "B"):
+            if getattr(test, f"cycle_{letter.lower()}") is None:
+                setattr(test, f"cycle_{letter.lower()}", _copy(test.source_cycle, letter))
+        test.save(update_fields=["cycle_a", "cycle_b"])
+    return _run_copies(test, client)
 
 
-def _run_copies(test: BriefTest, runs, client) -> BriefTest:
+def _run_copies(test: BriefTest, client) -> BriefTest:
+    """Run every copy that has no concepts yet, then record the result.
+
+    The status comes from what is actually saved (both copies have concepts, or
+    not), never from which request happened to finish last."""
+    runs = [(letter, cycle, text) for letter, cycle, text in
+            (("A", test.cycle_a, test.brief_a), ("B", test.cycle_b, test.brief_b))
+            if not cycle.concepts.exists()]
     errors = {}
 
     def one(letter, cycle, brief_text):
         try:
             stages.run_stage2(cycle, client=client, brand_brief=brief_text)
         except Exception as exc:  # recorded and shown; the other run carries on
-            errors[letter] = str(exc)
+            errors[letter] = str(exc) or type(exc).__name__
 
     def in_thread(*args):
         try:
@@ -149,12 +195,19 @@ def _run_copies(test: BriefTest, runs, client) -> BriefTest:
     else:
         for run in runs:
             one(*run)
-    if errors:
-        test.status = BriefTest.Status.FAILED
-        test.error = "; ".join(f"Run {k}: {v}" for k, v in sorted(errors.items()))[:4000]
+
+    missing = [letter for letter, cycle in (("A", test.cycle_a), ("B", test.cycle_b))
+               if not cycle.concepts.exists()]
+    if missing:
+        status = BriefTest.Status.FAILED
+        error = "; ".join(f"Run {k}: {errors.get(k, 'it produced no concepts')}" for k in missing)[:4000]
     else:
-        test.status = BriefTest.Status.DONE
-    test.save(update_fields=["status", "error"])
+        status, error = BriefTest.Status.DONE, ""
+    # Only the request that started this run writes its result. If a stale run was
+    # taken over, started_at has moved on and this write does nothing.
+    BriefTest.objects.filter(pk=test.pk, status=BriefTest.Status.RUNNING,
+                             started_at=test.started_at).update(status=status, error=error)
+    test.refresh_from_db()
     return test
 
 
