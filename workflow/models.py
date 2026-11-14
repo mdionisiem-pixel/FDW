@@ -617,6 +617,14 @@ class PieceVisuals(models.Model):
     prompts = models.JSONField(default=dict, blank=True)
     checklist = models.JSONField(default=list, blank=True)
     missing_information = models.JSONField(default=list, blank=True)
+    # How the technique and garment look in real products online, gathered before
+    # the prompts are written. General traits only; never a specific product.
+    research = models.JSONField(default=dict, blank=True)
+    # Gaps and contradictions in the specification the art director resolved.
+    assumptions = models.JSONField(default=list, blank=True)
+    # Acceptance criteria written as persona user stories; each criterion names the shots that can show it.
+    stories = models.JSONField(default=list, blank=True)
+    criteria = models.JSONField(default=list, blank=True)
     # Copied from gate 3, so the images show the piece as it will be made.
     accepted_changes = models.JSONField(default=list, blank=True)
     waitlist_only = models.BooleanField(default=False)

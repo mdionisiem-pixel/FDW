@@ -102,8 +102,12 @@ After gate 3, press **Set up visual prototypes**, then **Make images**. The page
 several images at once (`FDW_VISUAL_WORKERS`, default 2); keep the tab open while it
 runs. Closing it loses nothing; press the button again to carry on.
 
-For each piece kept at gate 3, Claude writes five shot prompts and a checklist from the
-specification and the changes you accepted at sourcing. Shot A is drawn first; B and C
+For each piece kept at gate 3, Claude first researches real products online to learn how its
+technique and kind of garment really look (general traits only; no brand or design is ever named
+or copied). It then writes five shot prompts, resolving any gaps in the specification and listing
+them, and a separate step writes acceptance criteria as user stories from five personas: the
+customer, the buyer opening the parcel, the maker, a sceptical shopper and the brand guardian.
+Images under 2048 px (`FDW_MIN_IMAGE_EDGE`) fail in code before review. Shot A is drawn first; B and C
 are drawn from A, D from A and B, E from A and D. Only images that passed review, or that
 you kept, are used as references. A separate Claude call reviews every image against the
 checklist; a failed image is redrawn with the reviewer's correction note, up to

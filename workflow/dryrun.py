@@ -493,8 +493,37 @@ def _art_direction(prompt: str) -> str:
             "Sample fact: stitch scale matches the yarn weight",
             "Sample fact: hems and closures are where the specification puts them",
         ],
-        "missing_information": ["Sample: the dry run did not check the specification for gaps."],
+        "assumptions": ["Sample: the dry run did not check the specification for gaps."],
     })
+
+
+def _visual_research(prompt: str) -> str:
+    urls = sample_source_urls()
+    return json.dumps({
+        "technique_traits": ["Sample trait: hand darning shows uneven, slightly raised strands with visible over-under crossings."],
+        "garment_traits": ["Sample trait: heavy hand knit hangs straight with soft folds at the hem."],
+        "must_not_look_like": ["Sample: a perfectly regular printed check or ribbon trim."],
+        "photography_notes": ["Sample: raking side light to show relief."],
+        "sources": [{"title": "Sample source", "url": urls[0] if urls else "https://example.com/sample"}],
+        "names_to_avoid": ["Samplebrand"],
+    })
+
+
+def _acceptance(prompt: str) -> str:
+    return json.dumps({"stories": [
+        {"persona": "Buyer opening the parcel",
+         "story": "As a buyer, I want the piece I receive to match the images, so that I trust the brand.",
+         "criteria": [
+             {"criterion": "Sample criterion: the colour family matches the specification", "severity": "critical",
+              "shots": ["A", "B", "C", "D", "E"]},
+             {"criterion": "Sample criterion: the back construction is consistent with the front", "severity": "detail",
+              "shots": ["B"]},
+         ]},
+        {"persona": "Sceptical shopper",
+         "story": "As a sceptical shopper, I want stitches to look real, so that I believe the piece exists.",
+         "criteria": [{"criterion": "Sample criterion: stitches read individually, never printed", "severity": "critical",
+                       "shots": ["C", "D"]}]},
+    ]})
 
 
 def _image_review(prompt: str) -> str:
@@ -553,6 +582,10 @@ def respond(step: str, prompt: str) -> str:
         return _sourcing(prompt)
     if base == "visual_art_direction":
         return _art_direction(prompt)
+    if base in ("visual_research", "visual_research_reformat"):
+        return _visual_research(prompt)
+    if base == "visual_acceptance":
+        return _acceptance(prompt)
     if base in ("visual_review", "reviewer_check"):
         return _image_review(prompt)
     raise ValueError(f"No dry-run response is defined for step '{step}'.")

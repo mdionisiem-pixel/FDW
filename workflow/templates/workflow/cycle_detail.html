@@ -747,6 +747,31 @@
             </details>
           {% endif %}
 
+          {% if pv.visuals.research %}
+            <details class="fold"><summary>Research on real products ({{ pv.visuals.research.sources|length }} source{{ pv.visuals.research.sources|length|pluralize }})</summary>
+              <p class="meta">How this technique and kind of piece look in real product photos online. Used as general guidance only: no brand, designer or product is named or copied.</p>
+              <h4>What it looks like</h4><ul class="plain">{% for t in pv.visuals.research.technique_traits %}<li>{{ t }}</li>{% endfor %}{% for t in pv.visuals.research.garment_traits %}<li>{{ t }}</li>{% endfor %}</ul>
+              <h4>What it must not look like</h4><ul class="plain">{% for t in pv.visuals.research.must_not_look_like %}<li>{{ t }}</li>{% endfor %}</ul>
+              <h4>Sources</h4><ul class="plain">{% for src in pv.visuals.research.sources %}<li><a href="{{ src.url }}" target="_blank" rel="noopener noreferrer">{{ src.title|default:src.url }}</a>{% if not src.verified %} <span class="meta">(not confirmed by the search tool)</span>{% endif %}</li>{% endfor %}</ul>
+            </details>
+          {% endif %}
+          {% if pv.visuals.assumptions %}
+            <details class="fold"><summary>Gaps in the specification, resolved ({{ pv.visuals.assumptions|length }})</summary>
+              <p class="meta">The specification did not say these, or said them two ways. The art director chose the most consistent reading, and every image and criterion follows it. Request changes if any is wrong.</p>
+              <ul class="plain">{% for a in pv.visuals.assumptions %}<li>{{ a }}</li>{% endfor %}</ul>
+            </details>
+          {% endif %}
+          {% if pv.visuals.stories %}
+            <details class="fold"><summary>Acceptance stories ({{ pv.visuals.criteria|length }} criteria)</summary>
+              <p class="meta">What the images must show, from the point of view of the people they serve. The reviewer checks each image against the criteria its shot can show.</p>
+              {% for st in pv.visuals.stories %}
+                <div class="story"><p><strong>{{ st.persona }}</strong>: {{ st.story }}</p>
+                  <ul class="checklist">{% for c in st.criteria %}<li class="{% if c.severity == 'critical' %}check-critical{% endif %}">{{ c.criterion }} <span class="meta">({{ c.severity }}; shot{{ c.shots|length|pluralize }} {{ c.shots|join:", " }})</span></li>{% endfor %}</ul>
+                </div>
+              {% endfor %}
+            </details>
+          {% endif %}
+
           {% if pv.visuals.status != 'writing' %}
             <ol class="shot-grid">
               {% for s in pv.shots %}
@@ -790,7 +815,7 @@
               {% csrf_token %}
               <h3>Gate 4: {{ pv.piece.name }}</h3>
               {% if pv.front_check %}
-                <p>{% if pv.a_stuck %}The front packshot did not pass review. It is shown above with the reviewer's notes.{% else %}The front packshot passed review.{% endif %} The other four shots are drawn from it, so check it now: approve it and make the rest, approve the piece with the front shot only, request changes for a new round, or reject the piece.</p>
+                <p>{% if pv.a_stuck %}The front packshot did not pass review. It is shown above with the reviewer's notes.{% else %}The front packshot passed review.{% endif %} The other four shots are drawn from it, so check it now, together with the resolved gaps and acceptance stories above: approve it and make the rest, approve the piece with the front shot only, request changes for a new round, or reject the piece.</p>
               {% else %}
                 <p>{{ pv.passed }} of 5 shots passed review. Every image is labelled as a concept render wherever it is shown.</p>
                 {% if pv.below_standard %}

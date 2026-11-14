@@ -703,10 +703,62 @@ SHOT_CODES = ("A", "B", "C", "D", "E")
 CHECK_RESULTS = {"match", "mismatch", "not_visible"}
 
 
-def validate_art_direction(data):
-    """Five self-contained prompts and a checklist the reviewer can work through."""
+def _name_pattern(name: str):
+    """A whole-word pattern for one name. Single words match only as written, so a
+    brand that is also an everyday word ("Next") does not block ordinary text."""
+    import re
+
+    words = name.split()
+    body = r"\s+".join(re.escape(w) for w in words)
+    flags = re.IGNORECASE if len(words) > 1 else 0
+    return re.compile(r"(?<![\w-])" + body + r"(?![\w-])", flags)
+
+
+def names_found(text: str, names) -> list:
+    return [n for n in names if len(n) >= 3 and _name_pattern(n).search(text or "")]
+
+
+def strip_names(text: str, names) -> str:
+    for name in names:
+        if len(name) >= 3:
+            text = _name_pattern(name).sub("", text)
+    return " ".join(text.split())
+
+
+def validate_visual_research(data):
     if not isinstance(data, dict):
-        raise SchemaError(["Expected a JSON object with prompts and reviewer_checklist."])
+        raise SchemaError(["Expected a JSON object for the visual research."])
+    problems = []
+    for field in ("technique_traits", "garment_traits", "must_not_look_like"):
+        if not _string_list(data.get(field)) or not [x for x in data[field] if x.strip()]:
+            problems.append(f"{field} must be a non-empty list of strings")
+    for field in ("photography_notes", "names_to_avoid"):
+        if not _string_list(data.get(field, [])):
+            problems.append(f"{field} must be a list of strings")
+    sources = data.get("sources")
+    if not isinstance(sources, list) or not sources:
+        problems.append("sources must list the pages the research used")
+    else:
+        for i, src in enumerate(sources):
+            if not isinstance(src, dict) or not _is_text(src.get("url")):
+                problems.append(f"sources[{i}] needs a url")
+    if problems:
+        raise SchemaError(problems)
+    clean = lambda items: [str(x).strip() for x in items if str(x).strip()]
+    return {
+        "technique_traits": clean(data["technique_traits"]),
+        "garment_traits": clean(data["garment_traits"]),
+        "must_not_look_like": clean(data["must_not_look_like"]),
+        "photography_notes": clean(data.get("photography_notes", [])),
+        "sources": [{"title": str(s.get("title") or "").strip(), "url": s["url"].strip()} for s in sources],
+        "names_to_avoid": sorted({n for n in clean(data.get("names_to_avoid", []))}),
+    }
+
+
+def validate_art_direction(data, names_to_avoid=()):
+    """Five self-contained prompts, the gaps the art director resolved, and no brand names."""
+    if not isinstance(data, dict):
+        raise SchemaError(["Expected a JSON object with prompts and assumptions."])
     problems = []
     prompts_ = data.get("prompts")
     if not isinstance(prompts_, dict):
@@ -718,19 +770,59 @@ def validate_art_direction(data):
                 problems.append(f"prompts.{shot} must be a non-empty string")
             elif len(text) < 200:
                 problems.append(f"prompts.{shot} is too short to describe the piece fully")
-    checklist = data.get("reviewer_checklist")
-    if not _string_list(checklist) or not 5 <= len([c for c in checklist if c.strip()]) <= 14:
-        problems.append("reviewer_checklist must be a list of 5 to 14 facts, as strings")
-    missing = data.get("missing_information", [])
-    if not _string_list(missing):
-        problems.append("missing_information must be a list of strings")
+            else:
+                found = names_found(text, names_to_avoid)
+                if found:
+                    problems.append(f"prompts.{shot} names {', '.join(found)}; Malina never names or imitates "
+                                    "another brand, designer or product. Describe the technique instead.")
+    assumptions = data.get("assumptions", [])
+    if not _string_list(assumptions):
+        problems.append("assumptions must be a list of strings")
     if problems:
         raise SchemaError(problems)
     return {
         "prompts": {shot: prompts_[shot].strip() for shot in SHOT_CODES},
-        "reviewer_checklist": [c.strip() for c in checklist if c.strip()],
-        "missing_information": [m.strip() for m in missing if m.strip()],
+        "assumptions": [a.strip() for a in assumptions if a.strip()],
     }
+
+
+def validate_acceptance(data, names_to_avoid=()):
+    """Persona user stories, each with criteria a reviewer can check by eye in the shots named."""
+    if not isinstance(data, dict) or not isinstance(data.get("stories"), list) or not data["stories"]:
+        raise SchemaError(["Expected a JSON object with a non-empty stories list."])
+    problems = []
+    stories = []
+    for i, story in enumerate(data["stories"]):
+        if not isinstance(story, dict) or not _is_text(story.get("persona")) or not _is_text(story.get("story")):
+            problems.append(f"stories[{i}] needs a persona and a story")
+            continue
+        criteria = []
+        for j, c in enumerate(story.get("criteria") or []):
+            if not isinstance(c, dict) or not _is_text(c.get("criterion")):
+                problems.append(f"stories[{i}].criteria[{j}] needs a criterion")
+                continue
+            if c.get("severity") not in ("critical", "detail"):
+                problems.append(f"stories[{i}].criteria[{j}].severity must be critical or detail")
+                continue
+            shots = [s for s in (c.get("shots") or []) if s in SHOT_CODES]
+            if not shots:
+                problems.append(f"stories[{i}].criteria[{j}].shots must name at least one of A, B, C, D, E")
+                continue
+            found = names_found(c["criterion"], names_to_avoid)
+            if found:
+                problems.append(f"stories[{i}].criteria[{j}] names {', '.join(found)}; never name another brand")
+                continue
+            criteria.append({"criterion": c["criterion"].strip(), "severity": c["severity"], "shots": shots})
+        if not criteria:
+            problems.append(f"stories[{i}] needs at least one usable criterion")
+        stories.append({"persona": story["persona"].strip(), "story": story["story"].strip(), "criteria": criteria})
+    if problems:
+        raise SchemaError(problems)
+    flat = [c for story in stories for c in story["criteria"]]
+    missing = [shot for shot in SHOT_CODES if not any(shot in c["shots"] for c in flat)]
+    if missing:
+        raise SchemaError([f"no criterion covers shot {', '.join(missing)}; every shot needs at least one"])
+    return {"stories": stories, "criteria": flat}
 
 
 SEVERITIES = ("critical", "minor")

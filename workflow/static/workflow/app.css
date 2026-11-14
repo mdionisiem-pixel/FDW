@@ -800,3 +800,6 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .btn-small { padding: 0.3rem 0.7rem; font-size: 0.85rem; flex: 1; }
 .mark-actions [data-verdict="accept"][aria-pressed="true"] { background: var(--moss); border-color: var(--moss); color: #fff; }
 .mark-actions [data-verdict="reject"][aria-pressed="true"] { background: var(--floss-deep); border-color: var(--floss-deep); color: #fff; }
+.story { margin: 0.5rem 0 0.75rem; }
+.story p { margin: 0 0 0.25rem; }
+.checklist .check-critical { font-weight: 600; }

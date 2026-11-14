@@ -22,7 +22,7 @@ def png_bytes(colour=(200, 120, 140)):
     from PIL import Image
 
     buffer = io.BytesIO()
-    Image.new("RGB", (64, 80), colour).save(buffer, "PNG")
+    Image.new("RGB", (1640, 2048), colour).save(buffer, "PNG")
     return buffer.getvalue()
 
 

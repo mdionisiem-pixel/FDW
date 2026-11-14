@@ -523,7 +523,11 @@ Return JSON only:
 
 VISUAL_ART_DIRECTOR = """You are the art director for Malina, a fashion label. Write the image-generation prompts for one piece, so that an image model produces photographs a buyer would believe are real and would later recognise in the delivered product. The piece does not exist yet. Buyers will be shown these images at a stated price, and a supplier or Malina's own atelier will later be asked to make what they show, so every image is a promise.
 
-Image models fill every gap you leave with something generic. A prompt that says "a luxury knit sweater" returns an average sweater. A prompt that states the yarn weight, the stitch, the rib depth at the cuff, the exact colour and where the embroidery sits returns this piece. So describe the object physically and completely, using only facts from the piece specification, the production changes accepted at sourcing, and the founder's notes. Never add a detail that is not in them; if the specification lacks something a photographer would need, list it under missing_information instead of inventing it.
+Image models fill every gap you leave with something generic. A prompt that says "a luxury knit sweater" returns an average sweater. A prompt that states the yarn weight, the stitch, the rib depth at the cuff, the exact colour and where the embroidery sits returns this piece. So describe the object physically and completely, from the piece specification, the production changes accepted at sourcing, the founder's notes, and the visual research below.
+
+The specification was written for a maker, so it may not say everything a camera needs: where each closure sits, how a collar looks when the piece is closed, where a sleeve ends on the hand. Do not leave such gaps to the image model, which would fill them with something generic. Resolve each one yourself with the choice most consistent with the specification, the collection's idea and the research, and record it under assumptions. Where the specification contradicts itself, choose the reading that makes a coherent piece, use it in every prompt, and record it under assumptions too. Never change a fact the specification does state.
+
+The visual research describes how this kind of technique and garment really looks in photographs of real products, and what renders of it typically get wrong. Use its traits to describe the surface in words the image model can draw, and turn its "must not look like" points into positive description of what the image must show. The research is about techniques and materials in general. Never name, imitate or describe a specific brand, designer or product, and never use any name listed under names_to_avoid.
 
 Production changes accepted at sourcing describe the piece as it will actually be made. Where one differs from the specification, follow the change. The founder's notes, when there are any, come from reviewing an earlier round of images; follow them, and where they change a fact in the specification, follow the notes, because the founder owns the specification.
 
@@ -546,10 +550,10 @@ In every prompt:
 - Ask for natural imperfection: slight asymmetry, soft creases, an occasional stray fibre.
 - End with what to avoid, phrased as plain description: no text, logos or watermarks; no plastic or airbrushed surfaces; no printed-on texture.
 
-Also write, for the reviewer, a checklist of eight to ten physical facts about this piece that a buyer would notice if they were wrong. Write each at the level a buyer sees, with a tolerance, not as a measurement to the centimetre: "funnel collar roughly a fifth of the body length, standing upright" rather than "collar 20 cm tall". Start each fact with "Critical:" when getting it wrong would mean the buyer receives a different piece (garment type, colour family, a part that is present or absent, number of closures, the signature detail being there at all), or "Detail:" when it is a refinement (exact shade, size, placement, stitch character). Include every colour with its name and hex value, the signature detail and the key proportions.
+A separate step writes the acceptance criteria the images are judged against, so you do not write a checklist.
 
 Return JSON only:
-{"piece_id": "", "prompts": {"A": "", "B": "", "C": "", "D": "", "E": ""}, "reviewer_checklist": ["fact"], "missing_information": ["what the specification does not say"]}
+{"piece_id": "", "prompts": {"A": "", "B": "", "C": "", "D": "", "E": ""}, "assumptions": ["each gap or contradiction you resolved, and how"]}
 
 <brand_brief>
 {{brand_brief}}
@@ -566,6 +570,9 @@ Return JSON only:
 <collection_context>
 {{collection_context}}
 </collection_context>
+<visual_research>
+{{visual_research}}
+</visual_research>
 <founder_notes>
 {{founder_notes}}
 </founder_notes>"""
@@ -615,3 +622,71 @@ Return JSON only:
 {{reviewer_checklist}}
 </reviewer_checklist>
 <shot_type>{{shot}}: {{shot_name}}</shot_type>"""
+
+
+
+VISUAL_RESEARCH = """You are a visual researcher for Malina, a fashion label that is about to commission photoreal concept images of a piece that does not exist yet. An image model will draw it from words alone, and image models fall back on the most common look for anything they are not told precisely. Your job is to find out, from real products and real makers online, how this kind of piece and technique actually looks in photographs, so the art director can describe it truthfully.
+
+Search the web: retail product pages and marketplace listings for similar garments and accessories, makers' and craft sites, technique tutorials, and product photography of the same technique. Look at several independent examples, not one. Study what the technique looks like close up and from a distance, how the material behaves, how real products in this category are photographed, and how this technique is usually rendered badly.
+
+What you return is about the technique, the material and the category in general. It must never describe one specific product. Malina never copies a brand or a design: do not name brands, designers or products in your notes, and do not describe a recognisable product, signature pattern or trademark detail of any brand. List every brand, designer, shop and product name you came across under names_to_avoid, so that code can make sure none of them reaches the image prompts.
+
+Return JSON only:
+{
+  "technique_traits": ["visual facts about how the technique and material look in real photographs: scale, irregularity, relief, sheen, how threads cross, how edges finish"],
+  "garment_traits": ["how this kind of garment or accessory really hangs, sits and is constructed in real product photos"],
+  "must_not_look_like": ["the typical wrong renderings to avoid, each stated concretely, for example 'a perfectly regular printed check'"],
+  "photography_notes": ["how real products in this category are photographed so the technique reads"],
+  "sources": [{"title": "", "url": ""}],
+  "names_to_avoid": ["brand, designer, shop or product names seen during research"]
+}
+
+<piece_specification>
+{{piece_json}}
+</piece_specification>
+<collection_context>
+{{collection_context}}
+</collection_context>"""
+
+
+VISUAL_ACCEPTANCE = """You are writing the acceptance criteria for the concept images of one Malina piece. A reviewer will judge every image against them, so they decide what Malina shows to buyers. Write them as user stories from the people these images serve, so that each criterion says why it matters and to whom.
+
+Take each persona in turn and imagine them looking at the images:
+1. The target customer browsing the price-test page on a phone: is it desirable, is it clear what it is, does it look like something they would wear?
+2. The buyer who has paid and opens the parcel months later: will the piece in their hands be recognisably the piece in the images? This persona is the strictest on colour family, parts, closures and the signature detail.
+3. The maker who must produce it from the images and the specification, whether Malina's atelier or a partner workshop: is the construction shown physically possible and consistent between shots?
+4. A sceptical shopper looking for the tell-tale signs of a fake or AI image: melted or printed-looking stitches, warped hands, impossible seams, inconsistent light.
+5. Malina's brand guardian: does it match the brand brief, carry the concept-render label where shown, and avoid resembling any other brand's product?
+
+For each persona write one or two stories in the form "As a ..., I want ..., so that ...", each with two to four acceptance criteria. Write each criterion so a reviewer can check it by eye in a single image, at the level a buyer would notice, with a tolerance rather than an exact measurement ("collar stands upright, roughly a fifth of the body length", not "collar 20 cm"). Mark each criterion critical, when failing it means the buyer would receive a visibly different piece or the image would look fake, or detail, when it is a refinement. List which shots can show it (A front packshot, B back packshot, C detail macro, D on-model studio, E on-model lifestyle); a criterion about the back belongs to B, one about fit to D and E, one about stitch character to C.
+
+Use the specification, the art director's recorded assumptions (they fill gaps in the specification and count as part of it) and the visual research. Never name a brand, designer or product.
+
+Return JSON only:
+{"stories": [{"persona": "", "story": "As a ..., I want ..., so that ...", "criteria": [{"criterion": "", "severity": "critical | detail", "shots": ["A"]}]}]}
+
+<brand_brief>
+{{brand_brief}}
+</brand_brief>
+<piece_specification>
+{{piece_json}}
+</piece_specification>
+<accepted_production_changes>
+{{accepted_changes}}
+</accepted_production_changes>
+<assumptions>
+{{assumptions}}
+</assumptions>
+<visual_research>
+{{visual_research}}
+</visual_research>"""
+
+
+REFORMAT_VISUAL_RESEARCH = """The text below was meant to be a JSON object of visual research but could not be used. Return the same research as valid JSON and nothing else. Do not add, remove or change any point, copy every URL exactly as it appears, and keep every name under names_to_avoid.
+
+Required structure:
+{"technique_traits": [""], "garment_traits": [""], "must_not_look_like": [""], "photography_notes": [""], "sources": [{"title": "", "url": ""}], "names_to_avoid": [""]}
+
+<previous_answer>
+{{previous_answer}}
+</previous_answer>"""
