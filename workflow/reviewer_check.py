@@ -22,7 +22,7 @@ from django.utils import timezone
 from . import schemas, visuals
 from .bakeoff import BakeoffError, check_spend
 from .llm import StageError, cost_of, get_client, parse_json
-from .models import BakeoffImage, ReviewerResult, ReviewerRun
+from .models import BakeoffImage, ReviewerResult, ReviewerRun, ShotAttempt
 
 STALE_AFTER = timedelta(minutes=10)
 # Set aside per review when estimating the cost of a run.
@@ -39,6 +39,14 @@ def scored_images():
     return [i for i in images if i.is_scored and i.file and i.piece.spec]
 
 
+def marked_attempts():
+    """Stage 4 images the founder has marked as ones they would accept or reject."""
+    return list(
+        ShotAttempt.objects.exclude(founder_verdict="").exclude(file="").filter(review__isnull=False)
+        .select_related("visuals", "visuals__piece")
+    )
+
+
 def latest_run():
     return ReviewerRun.objects.first()
 
@@ -49,17 +57,20 @@ def total_cost() -> Decimal:
 
 def start_run() -> ReviewerRun:
     images = scored_images()
-    if not images:
-        raise BakeoffError("Score some images in the image test first; the check compares the reviewer with your scores.")
+    attempts = marked_attempts()
+    if not images and not attempts:
+        raise BakeoffError("Mark some stage 4 images below, or score images in the image test, first: the check "
+                           "compares the reviewer with your own calls.")
     check_spend()
     with transaction.atomic():
         run = ReviewerRun.objects.create(
             model=settings.FDW_MODEL_WRITER, version=visuals.reviewer_version(),
             accept_score=settings.FDW_REVIEWER_ACCEPT_SCORE,
         )
-        ReviewerResult.objects.bulk_create([
-            ReviewerResult(run=run, image=image, founder_accepts=founder_accepts(image)) for image in images
-        ])
+        ReviewerResult.objects.bulk_create(
+            [ReviewerResult(run=run, image=image, founder_accepts=founder_accepts(image)) for image in images]
+            + [ReviewerResult(run=run, attempt=a, founder_accepts=a.founder_verdict == "accept") for a in attempts]
+        )
     return run
 
 
@@ -90,16 +101,25 @@ def review_next(run: ReviewerRun, client=None):
     if result is None:
         return None
     client = client or get_client()
-    image = result.image
-    piece = image.piece
-    reference = _reference(image)
-    spec = {"name": piece.name, "description": piece.spec.get("description", ""),
-            "founder_notes": piece.notes.strip() or "None."}
-    prompt = visuals.review_prompt(spec, [], piece.spec.get("checklist", []), image.shot,
-                                   [reference.shot] if reference else [])
+    if result.attempt_id:
+        # A stage 4 image: the same inputs stage 4's reviewer had, judged fresh.
+        attempt = result.attempt
+        piece_set = attempt.visuals
+        refs = sorted(ShotAttempt.objects.filter(pk__in=attempt.references), key=lambda a: a.shot)
+        prompt = visuals.review_prompt(piece_set.piece.spec, piece_set.accepted_changes, piece_set.checklist,
+                                       attempt.shot, [r.shot for r in refs])
+        sources = [attempt] + refs
+    else:
+        image = result.image
+        piece = image.piece
+        reference = _reference(image)
+        spec = {"name": piece.name, "description": piece.spec.get("description", ""),
+                "founder_notes": piece.notes.strip() or "None."}
+        prompt = visuals.review_prompt(spec, [], piece.spec.get("checklist", []), image.shot,
+                                       [reference.shot] if reference else [])
+        sources = [image] + ([reference] if reference else [])
     images = []
     if not getattr(client, "dry_run", False):
-        sources = [image] + ([reference] if reference else [])
         images = [visuals.review_payload(item.file) for item in sources if visuals._is_raster(item.file)]
     model = run.model
     cost_of(model, 0, 0)
@@ -146,7 +166,8 @@ def progress(run: ReviewerRun) -> dict:
 
 def summary(run: ReviewerRun) -> dict:
     """How far the reviewer agrees with the founder, and whether that is enough to trust it."""
-    results = [r for r in run.results.select_related("image", "image__piece") if r.verdict]
+    results = [r for r in run.results.select_related("image", "image__piece", "attempt", "attempt__visuals__piece")
+               if r.verdict]
     rejected = [r for r in results if not r.founder_accepts]
     accepted = [r for r in results if r.founder_accepts]
     caught = [r for r in rejected if r.verdict == "fail"]

@@ -490,7 +490,7 @@ Photographic truth
 - People look like real people: natural skin texture, correct hands, relaxed posture, the garment sitting on the body with real tension points.
 
 Automatic failures
-- Any detail that differs from the description.
+- A difference a buyer would see as a different piece: wrong garment, colour family, a missing or added part.
 - Melted, blurred or repeating-tile stitches; texture that looks printed on.
 - Impossible construction: a seam that leads nowhere, a button with no buttonhole.
 - Extra or missing fingers, warped faces, a garment floating off the body.
@@ -546,7 +546,7 @@ In every prompt:
 - Ask for natural imperfection: slight asymmetry, soft creases, an occasional stray fibre.
 - End with what to avoid, phrased as plain description: no text, logos or watermarks; no plastic or airbrushed surfaces; no printed-on texture.
 
-Also write, for the reviewer, a checklist of the ten most important physical facts about this piece that must be visible and correct in the images. Make each fact checkable by eye, and include every colour with its name and hex value, the signature detail with its size and placement, and the key proportions.
+Also write, for the reviewer, a checklist of eight to ten physical facts about this piece that a buyer would notice if they were wrong. Write each at the level a buyer sees, with a tolerance, not as a measurement to the centimetre: "funnel collar roughly a fifth of the body length, standing upright" rather than "collar 20 cm tall". Start each fact with "Critical:" when getting it wrong would mean the buyer receives a different piece (garment type, colour family, a part that is present or absent, number of closures, the signature detail being there at all), or "Detail:" when it is a refinement (exact shade, size, placement, stitch character). Include every colour with its name and hex value, the signature detail and the key proportions.
 
 Return JSON only:
 {"piece_id": "", "prompts": {"A": "", "B": "", "C": "", "D": "", "E": ""}, "reviewer_checklist": ["fact"], "missing_information": ["what the specification does not say"]}
@@ -579,25 +579,28 @@ You have the piece specification, the production changes accepted at sourcing (t
 
 Inspect the image carefully and in this order:
 1. Specification match. Go through the checklist one fact at a time. For each, state what you see in the image and whether it matches. Check counts (buttons, stripes, motifs), placement, proportions and colour.
-2. Colour, strictly. In testing, the image model Malina uses drew the right piece in slightly wrong colours more often than it made any other mistake. Compare every colour with its name and hex value as it would look under neutral light. A visible shift in hue, depth or warmth is a mismatch, even when the image is otherwise excellent. Allow only for the shading a real photograph shows on folds.
+2. Colour. In testing, the image model Malina uses drew the right piece in slightly wrong colours more often than it made any other mistake. Compare every colour with its name and hex value as it would look under neutral light, allowing for the shading a real photograph shows on folds. A different colour family is critical; a visible shift in depth or warmth within the right family is minor.
 3. Consistency with the reference images, when there are any: same colours, same stitch scale, same details in the same places, same proportions.
 4. Material realism. Look at the stitches or weave up close. Are they consistent in size, correctly structured, and three-dimensional, or do they blur, melt or repeat like a tile? Does embroidery sit raised with thread sheen? Does the fabric hang with believable weight?
 5. Construction. Do seams, hems, cuffs and closures make sense, and could a maker build exactly this?
 6. Photographic realism. Does light fall consistently? For on-model shots, check hands, face, skin texture and how the garment sits on the body.
 7. Forbidden content: text, logos, watermarks, or details not in the specification.
 
-Decide:
-- pass: every checklist fact that this shot shows is correct and nothing in the realism standard's automatic failures is present.
-- fail: anything else. A beautiful image that differs from the specification fails.
+Grade every mismatch by what it would mean for a buyer who pays on the strength of this image:
+- critical: they would receive a visibly different piece. Wrong garment type or silhouette, a different colour family (brown instead of red, not a darker brown), a part that is missing or added, the wrong number of closures or motifs, the signature detail absent or a different motif; or anything in the realism standard's automatic failures that a buyer would see, such as melted or printed-looking stitches, warped hands or faces, text or logos. A fact marked "Critical:" in the checklist is critical whenever it does not match.
+- minor: the piece is recognisably the one specified but a refinement is off: a slightly lighter or warmer shade of the right colour, a size or placement off by a little, a stitch that reads a bit flatter than described.
+Grade each realism issue the same way.
 
-When it fails, write a correction note for the next attempt: two to four specific sentences saying what was wrong and what the image must show instead. Describe the fix physically, for example "the rib at the hem must be 6 cm deep and grip the hip, not hang straight". The note is added to the image model's prompt, so write it as description of the right result, not as advice to a person.
+The verdict follows from the grades, and code applies it: an image passes when it has no critical mismatch or issue and at most {{max_minor}} minor ones. Still give your own verdict.
 
-Be strict. Passing a flawed image costs far more than regenerating one. If you cannot tell whether a fact is correct because it is not visible in this shot, mark it not_visible; that is not a failure unless the shot was meant to show it.
+When it fails, write a correction note for the next attempt: two to four specific sentences saying what was wrong and what the image must show instead, critical problems first. Describe the fix physically, for example "the rib at the hem must be 6 cm deep and grip the hip, not hang straight". The note is added to the image model's prompt, so write it as description of the right result, not as advice to a person.
+
+Be strict about critical problems: passing an image that shows a different piece costs far more than regenerating one. Be honest about minor ones without inflating them: an image is a concept render, labelled as such, and no photograph of a real garment matches a specification to the centimetre. If you cannot tell whether a fact is correct because it is not visible in this shot, mark it not_visible; that is not a mismatch unless the shot was meant to show it.
 
 {{earlier_corrections}}
 
 Return JSON only:
-{"piece_id": "", "shot": "", "checklist_results": [{"fact": "", "observed": "", "result": "match | mismatch | not_visible"}], "realism_issues": [], "verdict": "pass | fail", "correction_note": ""}
+{"piece_id": "", "shot": "", "checklist_results": [{"fact": "", "observed": "", "result": "match | mismatch | not_visible", "severity": "critical | minor (for mismatches)"}], "realism_issues": [{"issue": "", "severity": "critical | minor"}], "verdict": "pass | fail", "correction_note": ""}
 
 <realism_standard>
 {{realism_standard}}

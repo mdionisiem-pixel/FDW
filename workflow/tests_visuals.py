@@ -62,7 +62,7 @@ class ReviewClient:
             verdict = queue.pop(0) if queue else "pass"
             text = json.dumps({
                 "checklist_results": [{"fact": "Colour is Raspberry #B5305A", "observed": "as specified",
-                                       "result": "match" if verdict == "pass" else "mismatch"}],
+                                       "result": "match" if verdict == "pass" else "mismatch", "severity": "critical"}],
                 "realism_issues": [],
                 "verdict": verdict,
                 "correction_note": "" if verdict == "pass" else f"Fix {shot}: the colour must be a deep raspberry.",
@@ -97,7 +97,7 @@ def run_all(cycle, client=None, images=None, limit=400):
     raise AssertionError("stage 4 did not finish")
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
 class StartTests(TestCase):
     def test_refuses_before_gate_3(self):
         cycle = selected_cycle()
@@ -131,7 +131,7 @@ class StartTests(TestCase):
         self.assertEqual(cycle.status, Cycle.Status.SOURCING_APPROVED)
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
 class DryRunFlowTests(TestCase):
     def setUp(self):
         self.cycle = sourced_cycle()
@@ -168,7 +168,7 @@ class DryRunFlowTests(TestCase):
         self.assertEqual(self.cycle.visuals_spend_usd, Decimal("3"))
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=False, OPENROUTER_API_KEY="k",
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=False, OPENROUTER_API_KEY="k",
                    FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3,
                    FDW_IMAGE_MODEL="google/gemini-3-pro-image")
 class PaidFlowTests(TestCase):
@@ -191,19 +191,20 @@ class PaidFlowTests(TestCase):
         spent = ShotAttempt.objects.filter(visuals=self.piece_set).values_list("cost_usd", flat=True)
         self.assertEqual(sum(spent), Decimal("0.1358") * 5)
 
-    def test_a_failed_image_is_redrawn_and_stops_after_three_attempts(self):
+    def test_a_failed_image_that_does_not_improve_stops_after_two_attempts(self):
         images, client = FakeImages(), ReviewClient({"B": ["fail", "fail", "fail"]})
         run_all(self.cycle, client, images)
         self.piece_set.refresh_from_db()
         b = list(self.piece_set.attempts.filter(shot="B"))
-        self.assertEqual(len(b), 3)
+        # The second attempt was no closer than the first, so a third was not paid for.
+        self.assertEqual(len(b), 2)
         self.assertEqual(visuals.shot_state(b), "could_not_meet")
         self.assertEqual(self.piece_set.status, PieceVisuals.Status.READY)
         # D is drawn from A only, because B never passed.
         d = self.piece_set.attempts.get(shot="D", attempt=1)
         a = self.piece_set.attempts.get(shot="A", status=ShotAttempt.Status.PASSED)
         self.assertEqual(d.references, [a.pk])
-        # The reviewer of the third attempt was told what failed before.
+        # The reviewer of the second attempt was told what failed before.
         third_review = [p for s, p in client.prompts if s == "visual_review" and "<shot_type>B" in p][-1]
         self.assertIn("Earlier attempts at this shot failed", third_review)
 
@@ -213,8 +214,6 @@ class PaidFlowTests(TestCase):
         self.piece_set.refresh_from_db()
         self.assertEqual(self.piece_set.status, PieceVisuals.Status.READY)
         self.assertEqual(self.piece_set.attempts.exclude(shot="A").count(), 0)
-        with self.assertRaises(visuals.VisualsError):
-            visuals.decide(self.piece_set, "approve")
         visuals.decide(self.piece_set, "continue", user="founder")
         run_all(self.cycle, client, images)
         self.piece_set.refresh_from_db()
@@ -276,7 +275,7 @@ class PaidFlowTests(TestCase):
                          "waiting")
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
 class GateTests(TestCase):
     def setUp(self):
         self.cycle = sourced_cycle()
@@ -324,21 +323,24 @@ class GateTests(TestCase):
 
 
 class ReviewSchemaTests(TestCase):
-    def test_a_mismatch_fails_the_image_even_if_the_reviewer_passed_it(self):
+    def test_a_critical_mismatch_fails_the_image_even_if_the_reviewer_passed_it(self):
         data = schemas.validate_image_review({
-            "checklist_results": [{"fact": "Colour raspberry", "observed": "pink", "result": "mismatch"}],
+            "checklist_results": [{"fact": "Colour raspberry", "observed": "pink", "result": "mismatch",
+                                   "severity": "critical"}],
             "realism_issues": [], "verdict": "pass", "correction_note": "",
-        })
+        }, max_minor=2)
         self.assertEqual(data["verdict"], "fail")
         self.assertTrue(data["verdict_overridden"])
         self.assertIn("Colour raspberry", data["correction_note"])
 
-    def test_a_fail_without_a_note_or_mismatch_is_sent_back(self):
-        with self.assertRaises(schemas.SchemaError):
-            schemas.validate_image_review({
-                "checklist_results": [{"fact": "f", "observed": "o", "result": "match"}],
-                "realism_issues": ["melted stitches"], "verdict": "fail", "correction_note": "",
-            })
+    def test_a_critical_realism_issue_fails_with_a_note_built_from_it(self):
+        data = schemas.validate_image_review({
+            "checklist_results": [{"fact": "f", "observed": "o", "result": "match"}],
+            "realism_issues": [{"issue": "melted stitches on the cuff", "severity": "critical"}],
+            "verdict": "pass", "correction_note": "",
+        }, max_minor=2)
+        self.assertEqual(data["verdict"], "fail")
+        self.assertIn("melted stitches", data["correction_note"])
 
     def test_art_direction_needs_all_five_full_prompts(self):
         with self.assertRaises(schemas.SchemaError):
@@ -358,7 +360,7 @@ class StartupCheckTests(TestCase):
         self.assertEqual(checks.libraries_installed(None), [])
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"))
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"))
 class ScreenTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user("owner", password="pw")
@@ -400,7 +402,7 @@ class SlowSampleImages(SampleImages):
         return super().generate(model, prompt, references)
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=True, FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
 class ParallelWorkerTests(TransactionTestCase):
     """Three page workers at once, as in the browser, against the real SQLite file."""
 

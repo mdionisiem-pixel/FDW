@@ -435,4 +435,31 @@
       }
     });
   }
+
+  // Reviewer check: the founder's own accept or reject on stage 4 images.
+  // Pressing the chosen button again clears it.
+  var markGrid = document.querySelector(".mark-grid");
+  if (markGrid) {
+    var markToken = document.querySelector("#mark input[name=csrfmiddlewaretoken]").value;
+    var markCount = document.getElementById("mark-count");
+    markGrid.addEventListener("click", function (event) {
+      var button = event.target.closest("button[data-verdict]");
+      if (!button) return;
+      var item = button.closest(".mark-item");
+      var wanted = button.getAttribute("aria-pressed") === "true" ? "" : button.getAttribute("data-verdict");
+      var body = new FormData();
+      body.append("verdict", wanted);
+      fetch(item.getAttribute("data-url"), {
+        method: "POST", body: body, credentials: "same-origin",
+        headers: { "X-CSRFToken": markToken, "X-Requested-With": "fetch" }
+      }).then(function (response) { return response.json(); }).then(function (data) {
+        if (data.error) return;
+        item.setAttribute("data-verdict", data.verdict);
+        item.querySelectorAll("button[data-verdict]").forEach(function (b) {
+          b.setAttribute("aria-pressed", String(b.getAttribute("data-verdict") === data.verdict));
+        });
+        if (markCount) markCount.textContent = "Marked so far: " + data.accept + " accept, " + data.reject + " reject.";
+      });
+    });
+  }
 })();

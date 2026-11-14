@@ -7,7 +7,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from . import bakeoff, reviewer_check
-from .models import BakeoffImage, BakeoffPiece
+from .models import BakeoffImage, BakeoffPiece, Cycle, ShotAttempt
 
 SCORE_LABELS = [
     ("matches_piece", "Matches the real piece"),
@@ -245,6 +245,7 @@ def reviewer(request):
         "estimate": reviewer_check.ESTIMATE_PER_IMAGE * len(scored),
         "accept_score": settings.FDW_REVIEWER_ACCEPT_SCORE,
         "score_labels": SCORE_LABELS,
+        **_marking_context(request),
     }
     if run:
         context["progress"] = reviewer_check.progress(run)
@@ -253,6 +254,47 @@ def reviewer(request):
         order = {False: 0, True: 1, None: 2}
         context["results"] = sorted(results, key=lambda r: (order[r.agrees], r.founder_accepts, r.pk))
     return render(request, "workflow/bakeoff_reviewer.html", context)
+
+
+def _marking_context(request):
+    """Stage 4 images for the founder to mark, from one cycle at a time. The reviewer's verdict stays hidden."""
+    cycles = list(Cycle.objects.filter(visuals__attempts__isnull=False).distinct().order_by("-id"))
+    chosen = None
+    wanted = request.GET.get("cycle")
+    for cycle in cycles:
+        if wanted and str(cycle.pk) == wanted:
+            chosen = cycle
+    chosen = chosen or (cycles[0] if cycles else None)
+    attempts = []
+    if chosen:
+        attempts = list(
+            ShotAttempt.objects.filter(visuals__cycle=chosen, review__isnull=False).exclude(file="")
+            .select_related("visuals__piece").order_by("visuals__piece__piece_id", "shot", "round", "attempt")
+        )
+    marked = ShotAttempt.objects.exclude(founder_verdict="")
+    return {
+        "mark_cycles": cycles,
+        "mark_cycle": chosen,
+        "mark_attempts": attempts,
+        "marked_accept": marked.filter(founder_verdict="accept").count(),
+        "marked_reject": marked.filter(founder_verdict="reject").count(),
+    }
+
+
+@login_required
+@require_POST
+def mark_attempt(request, attempt_pk):
+    """Record the founder's own call on one stage 4 image: accept, reject, or clear."""
+    attempt = get_object_or_404(ShotAttempt, pk=attempt_pk)
+    verdict = request.POST.get("verdict", "")
+    if verdict not in ("accept", "reject", ""):
+        return JsonResponse({"error": "Choose accept or reject."}, status=400)
+    attempt.founder_verdict = verdict
+    attempt.save(update_fields=["founder_verdict"])
+    marked = ShotAttempt.objects.exclude(founder_verdict="")
+    return JsonResponse({"verdict": verdict,
+                         "accept": marked.filter(founder_verdict="accept").count(),
+                         "reject": marked.filter(founder_verdict="reject").count()})
 
 
 @login_required

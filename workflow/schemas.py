@@ -733,13 +733,28 @@ def validate_art_direction(data):
     }
 
 
-def validate_image_review(data):
-    """The reviewer's verdict on one image.
+SEVERITIES = ("critical", "minor")
 
-    Code, not the reviewer, has the last word on two points: a checklist
-    mismatch always fails the image, and a failed image always carries a
-    correction note, because the next attempt is built from that note.
+
+def _severity(value, default="minor"):
+    value = str(value or "").strip().lower()
+    return value if value in SEVERITIES else default
+
+
+def validate_image_review(data, max_minor=None):
+    """The reviewer's verdict on one image, decided in code from graded problems.
+
+    A critical problem means a buyer would receive a visibly different piece;
+    a minor one is a refinement that is off. The image passes with no critical
+    problem and at most ``max_minor`` minor ones (FDW_MAX_MINOR_MISMATCHES).
+    A checklist fact the art director marked "Critical:" is critical whenever
+    it does not match, whatever severity the reviewer gave it. A failed image
+    always carries a correction note, because the next attempt is built from it.
     """
+    from django.conf import settings
+
+    if max_minor is None:
+        max_minor = settings.FDW_MAX_MINOR_MISMATCHES
     if not isinstance(data, dict):
         raise SchemaError(["Expected a JSON object for the review."])
     problems = []
@@ -752,33 +767,57 @@ def validate_image_review(data):
             problems.append(f"checklist_results[{index}] needs a fact")
         elif item.get("result") not in CHECK_RESULTS:
             problems.append(f"checklist_results[{index}].result must be one of {sorted(CHECK_RESULTS)}")
-    issues = data.get("realism_issues", [])
-    if not _string_list(issues):
-        problems.append("realism_issues must be a list of strings")
+    raw_issues = data.get("realism_issues", [])
+    if not isinstance(raw_issues, list):
+        problems.append("realism_issues must be a list")
+        raw_issues = []
     verdict = data.get("verdict")
     if verdict not in ("pass", "fail"):
         problems.append("verdict must be pass or fail")
     if problems:
         raise SchemaError(problems)
-    mismatched = [r for r in results if r["result"] == "mismatch"]
-    if mismatched:
-        verdict = "fail"
-    note = str(data.get("correction_note") or "").strip()
-    if verdict == "fail" and not note:
-        if mismatched:
-            note = "Correct these facts: " + "; ".join(
-                f"{r['fact']} (the image showed: {str(r.get('observed') or 'something else').strip()})"
-                for r in mismatched
-            )
+
+    checklist = []
+    for r in results:
+        fact = r["fact"].strip()
+        entry = {"fact": fact, "observed": str(r.get("observed") or "").strip(), "result": r["result"]}
+        if r["result"] == "mismatch":
+            severity = _severity(r.get("severity"))
+            if fact.lower().startswith("critical:"):
+                severity = "critical"
+            entry["severity"] = severity
+        checklist.append(entry)
+    issues = []
+    for item in raw_issues:
+        if isinstance(item, dict):
+            text = str(item.get("issue") or "").strip()
+            severity = _severity(item.get("severity"))
         else:
-            raise SchemaError(["A failed image needs a correction_note saying what the next attempt must show."])
+            text, severity = str(item).strip(), "minor"
+        if text:
+            issues.append({"issue": text, "severity": severity})
+
+    mismatched = [r for r in checklist if r["result"] == "mismatch"]
+    critical = [r for r in mismatched if r["severity"] == "critical"] + [i for i in issues if i["severity"] == "critical"]
+    minor = [r for r in mismatched if r["severity"] == "minor"] + [i for i in issues if i["severity"] == "minor"]
+    decided = "fail" if critical or len(minor) > max_minor else "pass"
+
+    note = str(data.get("correction_note") or "").strip()
+    if decided == "fail" and not note:
+        parts = [
+            f"{r['fact']} (the image showed: {r['observed'] or 'something else'})" if "fact" in r else r["issue"]
+            for r in critical + minor
+        ]
+        note = "Correct these: " + "; ".join(parts)
     return {
-        "checklist_results": [
-            {"fact": r["fact"].strip(), "observed": str(r.get("observed") or "").strip(), "result": r["result"]}
-            for r in results
-        ],
-        "realism_issues": [i.strip() for i in issues if i.strip()],
-        "verdict": verdict,
-        "verdict_overridden": verdict != data.get("verdict"),
-        "correction_note": note if verdict == "fail" else "",
+        "checklist_results": checklist,
+        # Stored as text, critical first, so they read plainly wherever they are shown.
+        "realism_issues": [f"{i['severity'].capitalize()}: {i['issue']}" for i in
+                           sorted(issues, key=lambda i: i["severity"] != "critical")],
+        "critical_count": len(critical),
+        "minor_count": len(minor),
+        "verdict": decided,
+        "reviewer_verdict": verdict,
+        "verdict_overridden": decided != verdict,
+        "correction_note": note if decided == "fail" else "",
     }

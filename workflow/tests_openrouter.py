@@ -77,7 +77,7 @@ class PaymentErrorTests(TestCase):
 MEDIA = tempfile.mkdtemp(prefix="fdw-test-402-")
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=False, OPENROUTER_API_KEY="k",
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=False, OPENROUTER_API_KEY="k",
                    FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3)
 class Stage4PaymentTests(TestCase):
     def setUp(self):
@@ -125,7 +125,7 @@ class TooLargeTests(TestCase):
         self.assertIn("Nothing was charged", str(caught.exception))
 
 
-@override_settings(MEDIA_ROOT=MEDIA, FDW_DRY_RUN=False, OPENROUTER_API_KEY="k",
+@override_settings(FDW_FRONT_SHOT_GATE=False, MEDIA_ROOT=MEDIA, FDW_DRY_RUN=False, OPENROUTER_API_KEY="k",
                    FDW_VISUALS_LIMIT_USD=Decimal("15"), FDW_MAX_SHOT_ATTEMPTS=3,
                    FDW_REFERENCE_EDGE=1024, FDW_REFERENCE_FALLBACK_EDGE=640)
 class ReferenceSizeTests(TestCase):

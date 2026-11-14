@@ -57,7 +57,7 @@ DECISIONS = {
     "approve": "approved",
     "changes": "changes requested",
     "reject": "rejected",
-    "continue": "kept the best front packshot",
+    "continue": "front shot approved",
 }
 
 
@@ -322,7 +322,7 @@ def best_attempt(attempts):
     made = [a for a in attempts if a.file and a.review]
     if not made:
         return None
-    return max(made, key=lambda a: (-a.mismatches, a.matches, -len(a.review.get("realism_issues", [])), a.attempt))
+    return max(made, key=lambda a: (-a.problem_score, a.matches, a.attempt))
 
 
 def _by_shot(visuals: PieceVisuals) -> dict:
@@ -464,6 +464,7 @@ def review_prompt(spec, accepted_changes, checklist, shot: str, reference_shots,
         reviewer_checklist=_bullets(checklist, "None."),
         shot=shot,
         shot_name=SHOT_NAMES[shot],
+        max_minor=settings.FDW_MAX_MINOR_MISMATCHES,
     )
 
 
@@ -502,6 +503,18 @@ def _retry_prompt(visuals: PieceVisuals, failed) -> str:
     return base + "\n\nCorrections from earlier attempts at this image, all of which must be met:\n" + _bullets(notes, "")
 
 
+def _stalled(attempts) -> bool:
+    """The latest of two or more failed attempts is no closer to passing than the one before.
+
+    A third attempt from the same prompt then rarely helps, so the shot goes
+    to the founder instead of costing another image and review.
+    """
+    if len(attempts) < 2 or not all(a.status == ShotAttempt.Status.FAILED for a in attempts):
+        return False
+    last, previous = attempts[-1].problem_score, attempts[-2].problem_score
+    return last is not None and previous is not None and last >= previous
+
+
 def shot_state(attempts) -> str:
     """passed, kept, working, could_not_meet, or not_started."""
     if any(a.status == ShotAttempt.Status.PASSED for a in attempts):
@@ -512,7 +525,7 @@ def shot_state(attempts) -> str:
         return "not_started"
     if any(a.status in (ShotAttempt.Status.WAITING, ShotAttempt.Status.RUNNING) for a in attempts):
         return "working"
-    if len(attempts) >= settings.FDW_MAX_SHOT_ATTEMPTS:
+    if len(attempts) >= settings.FDW_MAX_SHOT_ATTEMPTS or _stalled(attempts):
         return "could_not_meet"
     return "working"
 
@@ -536,6 +549,17 @@ def advance(visuals: PieceVisuals) -> None:
         grouped = _by_shot(visuals)
         states = {shot: shot_state(attempts) for shot, attempts in grouped.items()}
         resolved = {s for s, state in states.items() if state in ("passed", "kept", "could_not_meet")}
+        if not visuals.front_approved:
+            if "A" not in resolved:
+                return
+            if states["A"] == "passed" and not settings.FDW_FRONT_SHOT_GATE:
+                visuals.front_approved = True
+                visuals.save(update_fields=["front_approved"])
+            else:
+                # The founder sees the front shot before four more shots are drawn from it.
+                visuals.status = PieceVisuals.Status.READY
+                visuals.save(update_fields=["status"])
+                return
         if states["A"] in ("passed", "kept"):
             for shot in SHOT_CODES[1:]:
                 if states[shot] == "not_started" and all(dep in resolved for dep in REFERENCES[shot]):
@@ -559,12 +583,18 @@ def advance(visuals: PieceVisuals) -> None:
 def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user: str = "") -> PieceVisuals:
     """Gate 4 for one piece.
 
+    At the front-shot check (shot A finished, B to E not yet made):
+    continue: the founder approves shot A, keeping its best attempt if it did
+      not pass review, and the other four shots are made from it.
+    approve: the piece goes forward with the front shot only.
+
+    After all five shots:
     approve: the piece's shots go forward. Shots that could not meet the
       standard go forward only if their key is in ``keep``; the rest are left out.
+
+    At either point:
     changes: a new round starts from new prompts that follow the notes.
     reject: the piece leaves the collection.
-    continue: shot A could not meet the standard; the founder keeps its best
-      attempt and the other four shots are made from it.
     """
     if decision not in DECISIONS:
         raise VisualsError("Choose approve, request changes, or reject.")
@@ -573,22 +603,29 @@ def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user:
     notes = notes.strip()
     grouped = _by_shot(visuals)
     states = {shot: shot_state(attempts) for shot, attempts in grouped.items()}
-    a_stuck = states["A"] == "could_not_meet"
+    front_check = not visuals.front_approved
     if decision == "changes" and not notes:
         raise VisualsError("Say what should change, so the next round of prompts can follow it.")
-    if decision == "approve" and a_stuck:
-        raise VisualsError(
-            "The front packshot did not meet the standard, so the other shots were not made. Keep its best "
-            "attempt and continue, request changes, or reject the piece."
-        )
-    if decision == "continue" and not a_stuck:
-        raise VisualsError("Continue is only for a front packshot that could not meet the standard.")
+    if decision == "continue" and not front_check:
+        raise VisualsError("Continue is only for approving the front shot before the other shots are made.")
+    if front_check and decision in ("approve", "continue") and best_attempt(grouped["A"]) is None:
+        raise VisualsError("No front packshot was made, so there is nothing to approve. Request changes instead.")
     keep = {str(k) for k in keep}
     cycle = visuals.cycle
     piece_label = f"{visuals.piece.piece_id} {visuals.piece.name}"
     with transaction.atomic():
         record = notes
-        if decision == "approve":
+        if decision == "approve" and front_check:
+            front = best_attempt(grouped["A"])
+            if front.status != ShotAttempt.Status.PASSED:
+                front.accepted = True
+                front.save(update_fields=["accepted"])
+            record = ". ".join(["Approved with the front shot only"] + ([notes] if notes else []))
+            visuals.front_approved = True
+            visuals.status = PieceVisuals.Status.APPROVED
+            visuals.decided_at = timezone.now()
+            visuals.save(update_fields=["front_approved", "status", "decided_at"])
+        elif decision == "approve":
             kept, left_out = [], []
             for shot, state in states.items():
                 if state != "could_not_meet":
@@ -618,19 +655,20 @@ def decide(visuals: PieceVisuals, decision: str, notes: str = "", keep=(), user:
             history = visuals.founder_notes.strip()
             visuals.founder_notes = (history + "\n" if history else "") + f"After round {visuals.round}: {notes}"
             visuals.round += 1
+            visuals.front_approved = False
             visuals.status = PieceVisuals.Status.WRITING
             visuals.prompts, visuals.checklist, visuals.missing_information = {}, [], []
             visuals.claimed_at = None
             visuals.error = ""
             visuals.save()
-        else:  # continue
+        else:  # continue: the front shot is approved and the other four are made from it
             best = best_attempt(grouped["A"])
-            if best is None:
-                raise VisualsError("No front packshot was made, so there is nothing to keep. Request changes instead.")
-            best.accepted = True
-            best.save(update_fields=["accepted"])
+            if best.status != ShotAttempt.Status.PASSED:
+                best.accepted = True
+                best.save(update_fields=["accepted"])
+            visuals.front_approved = True
             visuals.status = PieceVisuals.Status.MAKING
-            visuals.save(update_fields=["status"])
+            visuals.save(update_fields=["front_approved", "status"])
         Approval.objects.create(
             cycle=cycle, stage=4, item=piece_label[:200], decision=DECISIONS[decision][:20],
             notes=record, decided_by=user,
@@ -693,6 +731,7 @@ def piece_view(visuals: PieceVisuals) -> dict:
         "shots": shots,
         "below_standard": [s for s in shots if s["state"] == "could_not_meet" and s["shown"]],
         "a_stuck": shots[0]["state"] == "could_not_meet",
+        "front_check": not visuals.front_approved and visuals.status == PieceVisuals.Status.READY,
         "passed": sum(1 for s in shots if s["state"] == "passed"),
     }
 

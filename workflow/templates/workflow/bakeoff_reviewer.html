@@ -15,13 +15,41 @@
     </div>
   </div>
 
+  <div class="stage" id="mark">
+    <h2>Your calls on stage 4 images</h2>
+    <p class="stage-intro">Mark each image as one you would accept for the price-test page or one you would reject. The reviewer's verdict is hidden here so it cannot sway you. Aim for at least 15 you would reject and a similar number you would accept; then start a check below.</p>
+    {% if mark_cycles|length > 1 %}
+      <form method="get" class="run-row"><label for="mark-cycle">Cycle</label>
+        <select id="mark-cycle" name="cycle" onchange="this.form.submit()">{% for c in mark_cycles %}<option value="{{ c.pk }}" {% if c == mark_cycle %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select>
+      </form>
+    {% endif %}
+    {% if mark_attempts %}
+      {% csrf_token %}
+      <p class="meta" id="mark-count">Marked so far: {{ marked_accept }} accept, {{ marked_reject }} reject.</p>
+      <ol class="mark-grid">
+        {% for a in mark_attempts %}
+          <li class="mark-item" data-url="{% url 'bakeoff_mark_attempt' a.pk %}" data-verdict="{{ a.founder_verdict }}">
+            <a href="{% url 'visual_image' mark_cycle.pk a.pk %}" target="_blank" rel="noopener"><img src="{% url 'visual_image' mark_cycle.pk a.pk %}" alt="{{ a.visuals.piece.name }}, shot {{ a.shot }}, attempt {{ a.attempt }}" loading="lazy"></a>
+            <p class="meta">{{ a.visuals.piece.name }} · {{ a.shot }} · attempt {{ a.attempt }}</p>
+            <div class="mark-actions">
+              <button type="button" class="btn btn-small" data-verdict="accept" aria-pressed="{% if a.founder_verdict == 'accept' %}true{% else %}false{% endif %}">Accept</button>
+              <button type="button" class="btn btn-small" data-verdict="reject" aria-pressed="{% if a.founder_verdict == 'reject' %}true{% else %}false{% endif %}">Reject</button>
+            </div>
+          </li>
+        {% endfor %}
+      </ol>
+    {% else %}
+      <p class="meta">No stage 4 images yet.</p>
+    {% endif %}
+  </div>
+
   <div class="stage">
     <h2>How your scores are read</h2>
     <p class="stage-intro">An image counts as one you would accept when all four of your scores are {{ accept_score }} or higher; anything lower, as one you would reject. The number that matters most is how many images you would reject the reviewer also fails, because a missed one reaches buyers. Failing a good image only costs a redraw.</p>
     <form method="post" action="{% url 'bakeoff_reviewer_start' %}" class="run-row">
       {% csrf_token %}
-      <button class="btn{% if not run %} btn-primary{% endif %}" type="submit" {% if not scored_count %}disabled{% endif %}>{% if run %}Start a new check{% else %}Start the check{% endif %}</button>
-      <p class="meta">{{ scored_count }} scored image{{ scored_count|pluralize }}, {{ would_reject }} of them ones you would reject. About ${{ estimate|floatformat:2 }}.{% if run %} Earlier checks stay in the record.{% endif %}</p>
+      <button class="btn{% if not run %} btn-primary{% endif %}" type="submit" {% if not scored_count and not marked_accept and not marked_reject %}disabled{% endif %}>{% if run %}Start a new check{% else %}Start the check{% endif %}</button>
+      <p class="meta">{{ scored_count }} scored image-test image{{ scored_count|pluralize }} ({{ would_reject }} you would reject) and {{ marked_accept|add:marked_reject }} marked stage 4 image{{ marked_accept|add:marked_reject|pluralize }} ({{ marked_reject }} you would reject). About ${{ estimate|floatformat:2 }} for the image-test images, plus about $0.05 per stage 4 image.{% if run %} Earlier checks stay in the record.{% endif %}</p>
     </form>
   </div>
 
@@ -61,10 +89,10 @@
         <ol class="reviewer-list">
           {% for r in results %}
             <li class="reviewer-item {% if r.agrees is False %}disagree{% endif %}">
-              <img src="{% url 'bakeoff_image' r.image.pk %}" alt="Image {{ r.image.code }}, {{ r.image.get_shot_display|lower }} of {{ r.image.piece.name }}" loading="lazy">
+              {% if r.attempt_id %}<img src="{% url 'visual_image' r.attempt.visuals.cycle_id r.attempt.pk %}" alt="{{ r.label }}" loading="lazy">{% else %}<img src="{% url 'bakeoff_image' r.image.pk %}" alt="{{ r.label }}" loading="lazy">{% endif %}
               <div>
-                <p><strong>{{ r.image.piece.name }}, {{ r.image.get_shot_display|lower }}</strong> <span class="meta">image {{ r.image.code }}</span></p>
-                <p>You: <strong>{% if r.founder_accepts %}accept{% else %}reject{% endif %}</strong> <span class="meta">(scores {{ r.image.matches_piece }}, {{ r.image.material_realism }}, {{ r.image.colour_accuracy }}, {{ r.image.photo_realism }})</span>
+                <p><strong>{{ r.label }}</strong>{% if r.image_id %} <span class="meta">image {{ r.image.code }}</span>{% endif %}</p>
+                <p>You: <strong>{% if r.founder_accepts %}accept{% else %}reject{% endif %}</strong> <span class="meta">({{ r.scores_text }})</span>
                 · Reviewer: {% if r.verdict %}<strong>{% if r.verdict == 'pass' %}pass{% else %}fail{% endif %}</strong>{% elif r.error %}<span class="failed">{{ r.error|truncatechars:120 }}</span>{% else %}<span class="meta">waiting</span>{% endif %}
                 {% if r.agrees is False %}{% if r.founder_accepts %}<span class="verdict verdict-revise">Failed a good image</span>{% else %}<span class="verdict verdict-reject">Missed a flawed image</span>{% endif %}{% endif %}</p>
                 {% if r.review %}

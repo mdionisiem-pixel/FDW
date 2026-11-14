@@ -8,6 +8,7 @@ urlpatterns = [
     path("bakeoff/check-models/", views_bakeoff.check_models, name="bakeoff_check_models"),
     path("bakeoff/reviewer/", views_bakeoff.reviewer, name="bakeoff_reviewer"),
     path("bakeoff/reviewer/start/", views_bakeoff.reviewer_start, name="bakeoff_reviewer_start"),
+    path("bakeoff/reviewer/mark/<int:attempt_pk>/", views_bakeoff.mark_attempt, name="bakeoff_mark_attempt"),
     path("bakeoff/reviewer/next/", views_bakeoff.reviewer_next, name="bakeoff_reviewer_next"),
     path("bakeoff/results/", views_bakeoff.results, name="bakeoff_results"),
     path("bakeoff/pieces/<int:pk>/", views_bakeoff.piece_detail, name="bakeoff_piece"),
