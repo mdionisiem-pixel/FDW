@@ -10,7 +10,8 @@ from django.test import SimpleTestCase
 
 TEMPLATES = Path(__file__).parent / "templates" / "workflow"
 # Forms whose submit waits for a model or an outside service: they need data-working.
-FORM_ROUTES = ("run_stage1", "run_stage2", "run_stage3", "bakeoff_describe", "bakeoff_check_models")
+FORM_ROUTES = ("run_stage1", "run_stage2", "run_stage3", "bakeoff_describe", "bakeoff_check_models",
+               "brand_interview_start", "brand_interview_retry", "brand_interview_draft")
 # Panels the page drives one request at a time: they need an in-panel loader.
 LOOP_ROUTES = ("visuals_next", "bakeoff_make_next", "bakeoff_reviewer_next")
 
@@ -36,6 +37,12 @@ class LoaderCoverageTests(SimpleTestCase):
                     found.add(route)
                     self.assertIn('includes/work_card.html', match.group(1), f"{name}: {route} has no work card")
         self.assertEqual(found, set(LOOP_ROUTES))
+
+    def test_the_interview_answer_form_shows_the_analyst_thinking(self):
+        text = (TEMPLATES / "brand_interview.html").read_text()
+        match = re.search(r'<form[^>]*id="answer-form"[^>]*>(.{0,300})', text, re.S)
+        self.assertIsNotNone(match)
+        self.assertIn("includes/thinking_card.html", match.group(1))
 
     def test_work_card_has_the_parts_the_script_fills(self):
         card = (TEMPLATES / "includes" / "work_card.html").read_text()

@@ -1,0 +1,422 @@
+"""Brand analyst interview: questions, draft, approval, and vision/mission/goals in every prompt."""
+import json
+from decimal import Decimal
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
+from django.urls import reverse
+
+from . import analyst, bakeoff, prompts, stages
+from .llm import DryRunClient
+from .models import (AnalystCall, BrandBrief, BrandBriefVersion, BrandInterview, Cycle, InterviewTurn,
+                     ModelCall, RawItem)
+
+
+def turn_json(question="What future do you want Malina to bring about?", area="vision", ready=False, **coverage):
+    return json.dumps({
+        "reflection": "", "question": question, "why": "It anchors every design decision.", "area": area,
+        "examples": ["Clothes kept for decades", "Craft back in everyday wear"],
+        "coverage": coverage, "ready_to_draft": ready,
+    })
+
+
+DRAFT = json.dumps({
+    "vision": "Every wardrobe holds one piece made to be handed on.",
+    "mission": "Malina designs embroidered and crochet pieces in small batches for people who buy fewer, better things.",
+    "goals": [{"goal": "Sell out the winter pre-order", "measure": "40 pieces", "by_when": "March 2027", "horizon": "short"},
+              {"goal": "Run a two-person atelier", "measure": "two makers", "by_when": "2030", "horizon": "long"}],
+    "brief": "WHO BUYS\nWomen 30 to 50 who mend rather than replace.\n\nRULES\nNever claim handmade unless Atelier.",
+    "changes": ["Added a customer section."],
+    "to_confirm": ["Price band for knitwear (To confirm)"],
+})
+
+
+class ScriptedAnalyst:
+    """Answers with the queued texts in order and records each call."""
+
+    def __init__(self, *answers, cost=Decimal("0.0300")):
+        self.answers = list(answers)
+        self.calls = []
+        self.cost = cost
+
+    def complete(self, prompt, max_tokens, effort):
+        self.calls.append({"prompt": prompt, "max_tokens": max_tokens, "effort": effort})
+        return self.answers.pop(0), self.cost
+
+
+@override_settings(FDW_DRY_RUN=False, FDW_INTERVIEW_LIMIT_USD=Decimal("2"))
+class InterviewFlowTests(TestCase):
+    def setUp(self):
+        brief = BrandBrief.current()
+        brief.text = "BRAND BRIEF: MALINA\nRULES\n- Never claim a piece is handmade unless its tier is Atelier."
+        brief.save()
+
+    def test_the_first_question_builds_on_the_current_brief(self):
+        client = ScriptedAnalyst(turn_json(vision=1))
+        interview = analyst.start(client)
+        turn = interview.turns.get()
+        self.assertEqual((turn.role, turn.area), (InterviewTurn.Role.ANALYST, "vision"))
+        self.assertEqual(turn.examples, ["Clothes kept for decades", "Craft back in everyday wear"])
+        prompt = client.calls[0]["prompt"]
+        self.assertIn("Never claim a piece is handmade unless its tier is Atelier.", prompt)
+        self.assertIn("<questions_asked_so_far>0</questions_asked_so_far>", prompt)
+        self.assertEqual(interview.coverage["vision"], 1)
+        self.assertEqual(interview.cost_usd, Decimal("0.0300"))
+
+    def test_starting_again_resumes_the_open_interview(self):
+        first = analyst.start(ScriptedAnalyst(turn_json()))
+        self.assertEqual(analyst.start(ScriptedAnalyst()), first)
+
+    def test_each_answer_brings_the_next_question_with_the_conversation(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        client = ScriptedAnalyst(turn_json("Who is Malina for?", "mission", vision=2))
+        turn = analyst.answer(interview, "A world where clothes are mended, not thrown away.", client)
+        self.assertEqual(turn.text, "Who is Malina for?")
+        prompt = client.calls[0]["prompt"]
+        self.assertIn("Founder: A world where clothes are mended, not thrown away.", prompt)
+        self.assertIn("<questions_asked_so_far>1</questions_asked_so_far>", prompt)
+        self.assertEqual(client.calls[0]["effort"], "low")
+
+    def test_empty_overlong_and_double_answers_are_refused_without_a_call(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        client = ScriptedAnalyst()
+        for text in ("", "   ", "x" * (analyst.MAX_ANSWER_CHARS + 1)):
+            with self.assertRaises(analyst.AnalystError):
+                analyst.answer(interview, text, client)
+        InterviewTurn.objects.create(interview=interview, role=InterviewTurn.Role.FOUNDER, text="first click")
+        with self.assertRaisesMessage(analyst.AnalystError, "still working"):
+            analyst.answer(interview, "second click", client)
+        self.assertEqual(client.calls, [])
+
+    def test_an_unusable_answer_is_retried_once_with_the_problems(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        client = ScriptedAnalyst('{"question": ""}', turn_json("Who buys?", "customer"))
+        turn = analyst.answer(interview, "Skip", client)
+        self.assertEqual(turn.text, "Who buys?")
+        self.assertIn("Your previous answer could not be used", client.calls[1]["prompt"])
+        interview.refresh_from_db()
+        self.assertEqual(interview.cost_usd, Decimal("0.0900"))  # three calls in all, each counted
+
+    def test_a_failed_question_keeps_the_answer_and_can_be_retried(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+
+        class Broken:
+            def complete(self, *args):
+                raise bakeoff.OutOfCredit("OpenRouter returned 402 (payment_required).")
+
+        with self.assertRaises(analyst.AnalystError):
+            analyst.answer(interview, "My vision is slow fashion.", Broken())
+        interview.refresh_from_db()
+        self.assertEqual(interview.turns.last().text, "My vision is slow fashion.")
+        self.assertIn("402", interview.error)
+        turn = analyst.retry_question(interview, ScriptedAnalyst(turn_json("And the mission?", "mission")))
+        self.assertEqual(turn.text, "And the mission?")
+
+    def test_the_spend_limit_stops_the_next_call(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json(), cost=Decimal("2.10")))
+        client = ScriptedAnalyst(turn_json())
+        with self.assertRaisesMessage(analyst.AnalystError, "FDW_INTERVIEW_LIMIT_USD"):
+            analyst.answer(interview, "An answer", client)
+        self.assertEqual(client.calls, [])
+
+    def test_draft_then_approve_replaces_the_brief_and_keeps_the_old_one(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        analyst.answer(interview, "Clothes handed on.", ScriptedAnalyst(turn_json("Next?", "mission")))
+        client = ScriptedAnalyst(DRAFT)
+        draft = analyst.draft(interview, client)
+        self.assertEqual(client.calls[0]["effort"], "medium")
+        self.assertIn("word for word", client.calls[0]["prompt"])
+        self.assertIn("Founder: Clothes handed on.", client.calls[0]["prompt"])
+        interview.refresh_from_db()
+        self.assertEqual(interview.status, BrandInterview.Status.DRAFTED)
+        self.assertEqual(draft["goals"][0]["measure"], "40 pieces")
+
+        old_text = BrandBrief.current().text
+        analyst.approve(interview, draft["vision"], draft["mission"],
+                        "Sell out the winter pre-order (40 pieces; March 2027)\nGrow the waiting list",
+                        "Run a two-person atelier (two makers; 2030)", draft["brief"])
+        brief = BrandBrief.current()
+        self.assertEqual(brief.vision, "Every wardrobe holds one piece made to be handed on.")
+        self.assertEqual(brief.goals, [
+            {"goal": "Sell out the winter pre-order", "measure": "40 pieces", "by_when": "March 2027", "horizon": "short"},
+            {"goal": "Grow the waiting list", "measure": "", "by_when": "", "horizon": "short"},
+            {"goal": "Run a two-person atelier", "measure": "two makers", "by_when": "2030", "horizon": "long"},
+        ])
+        self.assertEqual([g["goal"] for g in brief.long_goals], ["Run a two-person atelier"])
+        before, after = BrandBriefVersion.objects.order_by("id")
+        self.assertEqual((before.source, before.text), (BrandBriefVersion.Source.BEFORE, old_text))
+        self.assertEqual(after.source, BrandBriefVersion.Source.INTERVIEW)
+        interview.refresh_from_db()
+        self.assertEqual(interview.status, BrandInterview.Status.APPROVED)
+
+    def test_a_draft_needs_at_least_one_answer(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        with self.assertRaisesMessage(analyst.AnalystError, "Answer at least one question"):
+            analyst.draft(interview, ScriptedAnalyst(DRAFT))
+
+
+class DryRunInterviewTests(TestCase):
+    @override_settings(FDW_DRY_RUN=True)
+    def test_the_dry_run_walks_every_area_and_drafts(self):
+        interview = analyst.start()
+        for _ in range(len(prompts.BRAND_AREAS) - 1):
+            analyst.answer(interview, "A sample answer.")
+        interview.refresh_from_db()
+        self.assertTrue(interview.coverage.get("ready"))
+        self.assertEqual({t.area for t in interview.turns.filter(role="analyst")}, set(prompts.BRAND_AREAS))
+        analyst.draft(interview)
+        interview.refresh_from_db()
+        self.assertEqual(interview.status, BrandInterview.Status.DRAFTED)
+
+
+class GoalParsingTests(TestCase):
+    def test_lines_become_goals_with_measure_date_and_horizon(self):
+        self.assertEqual(analyst.parse_goals("- Sell 40 coats (40 pieces; March 2027)\n\n• Open a studio (2028)\nPlain goal", "long"), [
+            {"goal": "Sell 40 coats", "measure": "40 pieces", "by_when": "March 2027", "horizon": "long"},
+            {"goal": "Open a studio", "measure": "2028", "by_when": "", "horizon": "long"},
+            {"goal": "Plain goal", "measure": "", "by_when": "", "horizon": "long"},
+        ])
+
+    def test_both_horizons_are_kept_apart(self):
+        goals = analyst.parse_both_goals("Sell 40 coats", "Open a studio (2030)")
+        self.assertEqual([(g["goal"], g["horizon"]) for g in goals], [("Sell 40 coats", "short"), ("Open a studio", "long")])
+
+
+class PromptTextTests(TestCase):
+    def test_vision_mission_and_goals_come_first_in_every_prompt(self):
+        brief = BrandBrief.current()
+        brief.vision, brief.mission = "A mended world.", "Small batches, proven demand."
+        brief.goals = [{"goal": "Open a studio", "measure": "", "by_when": "2030", "horizon": "long"},
+                       {"goal": "Sell 40 coats", "measure": "", "by_when": "March 2027", "horizon": "short"}]
+        brief.save()
+        text = brief.prompt_text
+        self.assertTrue(text.startswith(
+            "VISION\nA mended world.\n\nMISSION\nSmall batches, proven demand.\n\n"
+            "SHORT-TERM GOALS (the next 12 months)\n- Sell 40 coats (March 2027)\n\n"
+            "LONG-TERM GOALS (3 to 5 years)\n- Open a studio (2030)"))
+        self.assertTrue(text.endswith(brief.text.strip()))
+
+    def test_without_them_the_prompt_is_the_brief_alone(self):
+        brief = BrandBrief.current()
+        self.assertEqual(brief.prompt_text, brief.text.strip())
+
+    def test_stage_1_research_receives_the_vision(self):
+        brief = BrandBrief.current()
+        brief.vision = "VISION-MARKER: every wardrobe holds one piece made to be handed on."
+        brief.save()
+        cycle = Cycle.objects.create(name="Test")
+        RawItem.objects.create(cycle=cycle, source="dm", text="Do you make cardigans?")
+        stages.run_stage1(cycle, client=DryRunClient())
+        prompts_seen = ModelCall.objects.filter(cycle=cycle).values_list("prompt", flat=True)
+        self.assertTrue(any("VISION-MARKER" in p for p in prompts_seen))
+
+    def test_unconfirmed_lines_count_every_part(self):
+        brief = BrandBrief.current()
+        brief.vision = "A vision (To confirm)"
+        brief.goals = [{"goal": "Sell 40 (To confirm)", "measure": "", "by_when": ""}]
+        brief.text = "Brief"
+        brief.save()
+        self.assertEqual(brief.unconfirmed_lines, 2)
+
+
+@override_settings(OPENROUTER_API_KEY="test-key", FDW_MODEL_ANALYST="moonshotai/kimi-k3")
+class OpenRouterChatTests(TestCase):
+    def test_request_shape_and_reported_cost(self):
+        chat = analyst.OpenRouterChat()
+        sent = []
+
+        def fake(method, path, payload=None, timeout=None):
+            sent.append((path, payload))
+            return {"choices": [{"message": {"content": turn_json()}}], "usage": {"cost": 0.0123}}
+
+        chat._request = fake
+        reply = chat.complete("Prompt", 6000, "low")
+        path, payload = sent[0]
+        self.assertEqual(path, "/chat/completions")
+        self.assertEqual(payload["model"], "moonshotai/kimi-k3")
+        self.assertEqual(payload["max_tokens"], 6000)
+        self.assertEqual(payload["reasoning"], {"effort": "low", "exclude": True})
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertEqual(reply.cost, Decimal("0.0123"))
+        self.assertEqual(payload["provider"], {"data_collection": "deny", "zdr": True})
+
+    def test_a_provider_that_rejects_json_mode_is_asked_again_without_it(self):
+        chat = analyst.OpenRouterChat()
+        sent = []
+
+        def fake(method, path, payload=None, timeout=None):
+            sent.append(dict(payload))
+            if "response_format" in payload:
+                raise bakeoff.BakeoffError("OpenRouter returned 400: response_format not supported")
+            return {"choices": [{"message": {"content": turn_json()}}], "usage": {}}
+
+        chat._request = fake
+        reply = chat.complete("Prompt", 6000, "low")
+        self.assertNotIn("response_format", sent[1])
+        self.assertEqual(reply.cost, Decimal("0"))
+
+    @override_settings(FDW_ANALYST_PRIVATE=False)
+    def test_privacy_can_be_switched_off(self):
+        chat = analyst.OpenRouterChat()
+        sent = []
+        chat._request = lambda m, p, payload=None, timeout=None: sent.append(payload) or {
+            "choices": [{"message": {"content": "{}"}}]}
+        chat.complete("Prompt", 100, "low")
+        self.assertNotIn("provider", sent[0])
+
+    def test_no_private_provider_says_what_to_do(self):
+        chat = analyst.OpenRouterChat()
+
+        def fake(method, path, payload=None, timeout=None):
+            raise bakeoff.BakeoffError('OpenRouter returned 404: {"error": "No endpoints found matching your data policy"}')
+
+        chat._request = fake
+        with self.assertRaisesMessage(analyst.AnalystError, "FDW_ANALYST_PRIVATE=0"):
+            chat.complete("Prompt", 100, "low")
+
+    def test_reply_details_are_read(self):
+        chat = analyst.OpenRouterChat()
+        chat._request = lambda m, p, payload=None, timeout=None: {
+            "provider": "Fireworks", "choices": [{"message": {"content": "{}"}, "finish_reason": "length"}],
+            "usage": {"prompt_tokens": 1200, "completion_tokens": 6000, "cost": "0.0942"}}
+        reply = chat.complete("Prompt", 6000, "low")
+        self.assertEqual((reply.provider, reply.finish_reason, reply.input_tokens, reply.output_tokens),
+                         ("Fireworks", "length", 1200, 6000))
+
+    @override_settings(OPENROUTER_API_KEY="", FDW_DRY_RUN=False)
+    def test_no_key_says_what_to_do(self):
+        with self.assertRaisesMessage(analyst.AnalystError, "OPENROUTER_API_KEY"):
+            analyst.get_client()
+
+
+@override_settings(FDW_DRY_RUN=True)
+class PageTests(TestCase):
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_user("owner", password="pw"))
+
+    def test_the_whole_journey_through_the_pages(self):
+        page = self.client.get(reverse("brand_brief"))
+        self.assertContains(page, "Start the interview")
+        self.client.post(reverse("brand_interview_start"))
+        interview = BrandInterview.objects.get()
+        page = self.client.get(reverse("brand_interview"))
+        self.assertContains(page, "Sample question 1")
+        self.assertContains(page, "A different sample answer")
+        response = self.client.post(reverse("brand_interview_answer", args=[interview.pk]), {"answer": "Mended clothes."})
+        self.assertEqual(response.json()["area"], "mission")
+        response = self.client.post(reverse("brand_interview_answer", args=[interview.pk]), {"answer": ""})
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()["saved"])
+        self.client.post(reverse("brand_interview_draft", args=[interview.pk]))
+        page = self.client.get(reverse("brand_interview"))
+        self.assertContains(page, "Approve and use in every prompt")
+        self.assertContains(page, "Sell out the winter pre-order (40 pieces; March 2027)")
+        self.assertContains(page, "Run Malina as a two-person atelier (two makers; 2030)")
+        self.client.post(reverse("brand_interview_approve", args=[interview.pk]), {
+            "vision": "Edited vision.", "mission": "Edited mission.", "short_goals": "Goal one (10; 2027)",
+            "long_goals": "Goal two (studio; 2030)", "text": "Edited brief.",
+        })
+        brief = BrandBrief.current()
+        self.assertEqual((brief.vision, brief.text), ("Edited vision.", "Edited brief."))
+        page = self.client.get(reverse("brand_brief"))
+        self.assertContains(page, "Edited vision.")
+        self.assertContains(page, "Long-term goals")
+        self.assertContains(page, "Goal two")
+        self.assertContains(page, "Earlier versions")
+
+    def test_editing_by_hand_saves_all_four_parts_and_can_be_restored(self):
+        original = BrandBrief.current().text
+        self.client.post(reverse("brand_brief"), {"vision": "V", "mission": "M", "short_goals": "G (1; 2027)",
+                                                   "long_goals": "L (2; 2030)", "text": "New text"})
+        brief = BrandBrief.current()
+        self.assertEqual((brief.vision, brief.mission, brief.text), ("V", "M", "New text"))
+        self.assertEqual([g["horizon"] for g in brief.goals], ["short", "long"])
+        before = BrandBriefVersion.objects.get(source=BrandBriefVersion.Source.BEFORE)
+        self.client.post(reverse("brand_restore", args=[before.pk]))
+        self.assertEqual(BrandBrief.current().text, original)
+
+    def test_a_failed_question_after_a_saved_answer_tells_the_page_to_reload(self):
+        self.client.post(reverse("brand_interview_start"))
+        interview = BrandInterview.objects.get()
+        with override_settings(FDW_INTERVIEW_LIMIT_USD=Decimal("0")):
+            response = self.client.post(reverse("brand_interview_answer", args=[interview.pk]), {"answer": "Kept."})
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(response.json()["saved"])
+        page = self.client.get(reverse("brand_interview"))
+        self.assertContains(page, "Ask the next question")
+
+    def test_ending_the_interview_changes_nothing(self):
+        before = BrandBrief.current().prompt_text
+        self.client.post(reverse("brand_interview_start"))
+        interview = BrandInterview.objects.get()
+        self.client.post(reverse("brand_interview_close", args=[interview.pk]))
+        self.assertEqual(BrandBrief.current().prompt_text, before)
+        self.assertContains(self.client.get(reverse("brand_brief")), "Start the interview")
+
+
+@override_settings(FDW_DRY_RUN=False, FDW_INTERVIEW_LIMIT_USD=Decimal("2"), FDW_ANALYST_TURN_TOKENS=6000)
+class CallRecordTests(TestCase):
+    def test_every_call_is_recorded_with_prompt_reply_and_time(self):
+        interview = analyst.start(ScriptedAnalyst(turn_json()))
+        call = AnalystCall.objects.get()
+        self.assertEqual((call.interview, call.kind, call.ok), (interview, "question", True))
+        self.assertIn("<questions_asked_so_far>0</questions_asked_so_far>", call.prompt)
+        self.assertIn("What future do you want", call.response)
+        self.assertEqual(call.cost_usd, Decimal("0.0300"))
+        self.assertGreaterEqual(call.seconds, 0)
+
+    def test_a_failed_call_is_recorded_with_its_error(self):
+        class Broken:
+            def complete(self, *args):
+                raise bakeoff.OutOfCredit("OpenRouter returned 402 (payment_required).")
+
+        with self.assertRaises(analyst.AnalystError):
+            analyst.start(Broken())
+        call = AnalystCall.objects.get()
+        self.assertFalse(call.ok)
+        self.assertIn("402", call.error)
+
+    def test_a_reply_cut_off_at_the_length_limit_is_asked_again_with_more_room(self):
+        class CutOff:
+            def __init__(self):
+                self.tokens = []
+
+            def complete(self, prompt, max_tokens, effort):
+                self.tokens.append(max_tokens)
+                if len(self.tokens) == 1:
+                    return analyst.Reply("", Decimal("0.05"), finish_reason="length")
+                return analyst.Reply(turn_json(), Decimal("0.03"), finish_reason="stop")
+
+        client = CutOff()
+        interview = analyst.start(client)
+        self.assertEqual(client.tokens, [6000, 12000])
+        self.assertEqual(list(AnalystCall.objects.order_by("id").values_list("kind", "finish_reason")),
+                         [("question", "length"), ("question_retry", "stop")])
+        self.assertEqual(interview.cost_usd, Decimal("0.08"))
+
+    def test_cut_off_twice_says_which_setting_to_raise(self):
+        client = ScriptedAnalyst(analyst.Reply("", finish_reason="length"), analyst.Reply("", finish_reason="length"))
+        client.complete = lambda prompt, max_tokens, effort, answers=client.answers: answers.pop(0)
+        with self.assertRaisesMessage(analyst.AnalystError, "FDW_ANALYST_TURN_TOKENS"):
+            analyst.start(client)
+
+
+class GoalHorizonDraftTests(TestCase):
+    def test_a_draft_without_long_term_goals_puts_the_gap_in_front_of_the_founder(self):
+        from . import schemas
+        data = json.loads(DRAFT)
+        data["goals"] = [g for g in data["goals"] if g["horizon"] == "short"]
+        draft = schemas.validate_brand_draft(data)
+        self.assertTrue(any("No long-term goals" in c for c in draft["to_confirm"]))
+
+    def test_a_goal_without_a_horizon_is_sent_back(self):
+        from . import schemas
+        data = json.loads(DRAFT)
+        del data["goals"][0]["horizon"]
+        with self.assertRaises(schemas.SchemaError):
+            schemas.validate_brand_draft(data)
+
+    def test_the_interview_covers_both_horizons(self):
+        self.assertIn("short_goals", prompts.BRAND_AREAS)
+        self.assertIn("long_goals", prompts.BRAND_AREAS)
+        self.assertIn("Long-term goals: where the brand should stand in three to five years", prompts.BRAND_ANALYST)

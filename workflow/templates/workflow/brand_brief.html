@@ -1,9 +1,45 @@
 {% extends "workflow/base.html" %}
+{% load workflow_extras %}
 {% block title %}Brand brief | Malina studio{% endblock %}
 {% block content %}
 <section class="page page-narrow">
   <h1>Brand brief</h1>
-  <p class="lede">This text goes into every prompt. The model can only design for Malina as well as this describes it, so be specific: name the motifs, give hex colours, state prices.</p>
+  <p class="lede">The vision, mission, goals and brief below go into every prompt. Research, designs, reviews and images are judged against them, so the sharper they are, the more the work looks like Malina.</p>
+
+  <div class="brand-statements">
+    <article class="statement">
+      <h2>Vision</h2>
+      {% if brief.vision %}<p>{{ brief.vision }}</p>{% else %}<p class="meta">Not written yet.</p>{% endif %}
+    </article>
+    <article class="statement">
+      <h2>Mission</h2>
+      {% if brief.mission %}<p>{{ brief.mission }}</p>{% else %}<p class="meta">Not written yet.</p>{% endif %}
+    </article>
+    {% for group in goal_groups %}
+      <article class="statement statement-goals">
+        <h2>{{ group.title }} <span class="statement-horizon">{{ group.horizon }}</span></h2>
+        {% if group.goals %}
+          <ol class="goal-list">
+            {% for g in group.goals %}<li><strong>{{ g.goal }}</strong>{% if g.measure or g.by_when %}<span class="meta">{% if g.measure %}{{ g.measure }}{% endif %}{% if g.measure and g.by_when %} · {% endif %}{% if g.by_when %}by {{ g.by_when }}{% endif %}</span>{% endif %}</li>{% endfor %}
+          </ol>
+        {% else %}<p class="meta">Not set yet.</p>{% endif %}
+      </article>
+    {% endfor %}
+  </div>
+
+  <aside class="callout analyst-callout">
+    {% if interview %}
+      <p><strong>{% if interview.status == "drafted" %}The analyst's draft is waiting for your review.{% else %}Interview in progress: {{ interview.answered }} question{{ interview.answered|pluralize }} answered.{% endif %}</strong></p>
+      <a class="btn btn-primary" href="{% url 'brand_interview' %}">{% if interview.status == "drafted" %}Review the draft{% else %}Continue the interview{% endif %}</a>
+    {% else %}
+      <p><strong>Work it out with a business analyst.</strong> An analyst model asks you one question at a time about your vision, mission, short- and long-term goals, customer, positioning and brand. It builds on the brief you already have, then drafts all of it for you to edit and approve. Nothing changes until you approve.</p>
+      <form method="post" action="{% url 'brand_interview_start' %}" data-working="The analyst is reading your brief and preparing the first question" data-loader="hoop" data-quips="analyst">
+        {% csrf_token %}
+        <button class="btn btn-primary" type="submit">Start the interview</button>
+      </form>
+      <p class="meta">About 12 to 18 questions. Uses {{ analyst_model }} through OpenRouter{% if dry_run %} (dry run: sample questions, no cost){% endif %}.</p>
+    {% endif %}
+  </aside>
 
   {% if brief.unconfirmed_lines %}
     <aside class="callout">
@@ -14,14 +50,44 @@
     <p class="stamp stamp-ok">All lines confirmed</p>
   {% endif %}
 
-  <form method="post" class="brief-form">
-    {% csrf_token %}
-    <label for="brief-text">Brand brief text</label>
-    <textarea id="brief-text" name="text" rows="30" spellcheck="true">{{ brief.text }}</textarea>
-    <div class="form-foot">
-      <p class="meta">Last saved {{ brief.updated_at|date:"j M Y, H:i" }}</p>
-      <button class="btn btn-primary" type="submit">Save brand brief</button>
-    </div>
-  </form>
+  <details class="fold">
+    <summary>Edit by hand</summary>
+    <form method="post" class="brief-form">
+      {% csrf_token %}
+      <label for="brief-vision">Vision</label>
+      <textarea id="brief-vision" name="vision" rows="2">{{ brief.vision }}</textarea>
+      <label for="brief-mission">Mission</label>
+      <textarea id="brief-mission" name="mission" rows="3">{{ brief.mission }}</textarea>
+      <label for="brief-short-goals">Short-term goals, the next 12 months. One per line: goal (measure; by when)</label>
+      <textarea id="brief-short-goals" name="short_goals" rows="4">{{ brief.short_goals_text }}</textarea>
+      <label for="brief-long-goals">Long-term goals, 3 to 5 years. One per line: goal (measure; by when)</label>
+      <textarea id="brief-long-goals" name="long_goals" rows="4">{{ brief.long_goals_text }}</textarea>
+      <label for="brief-text">Brand brief</label>
+      <textarea id="brief-text" name="text" rows="30" spellcheck="true">{{ brief.text }}</textarea>
+      <div class="form-foot">
+        <p class="meta">Last saved {{ brief.updated_at|date:"j M Y, H:i" }}</p>
+        <button class="btn btn-primary" type="submit">Save brand brief</button>
+      </div>
+    </form>
+  </details>
+
+  {% if versions %}
+    <details class="fold">
+      <summary>Earlier versions ({{ versions|length }})</summary>
+      <ul class="version-list">
+        {% for v in versions %}
+          <li>
+            <details>
+              <summary>{{ v.created_at|date:"j M Y, H:i" }} · {{ v.get_source_display }}{% if v.note %} · <span class="meta">{{ v.note }}</span>{% endif %}</summary>
+              {% if v.vision %}<p><strong>Vision:</strong> {{ v.vision }}</p>{% endif %}
+              {% if v.mission %}<p><strong>Mission:</strong> {{ v.mission }}</p>{% endif %}
+              <pre class="version-text">{{ v.text }}</pre>
+              <form method="post" action="{% url 'brand_restore' v.pk %}">{% csrf_token %}<button class="btn" type="submit">Restore this version</button></form>
+            </details>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
 </section>
 {% endblock %}

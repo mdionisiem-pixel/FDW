@@ -292,7 +292,7 @@ def write_prompts(visuals: PieceVisuals, client=None) -> PieceVisuals:
     cycle = visuals.cycle
     piece = visuals.piece
     client = client or get_client()
-    brand_brief = BrandBrief.current().text
+    brand_brief = BrandBrief.current().prompt_text
     piece_json = json.dumps(piece.spec, ensure_ascii=False, indent=1)
     accepted = _bullets(visuals.accepted_changes, "None. Make the piece exactly as specified.")
     try:

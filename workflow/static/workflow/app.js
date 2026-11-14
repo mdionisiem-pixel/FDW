@@ -73,6 +73,15 @@
       "Squinting at the colour of that red",
       "Being strict, as instructed"
     ],
+    analyst: [
+      "Reading between the lines",
+      "Asking why, one more time",
+      "Measuring twice before cutting",
+      "Turning 'premium' into a price",
+      "Sorting vision from wishful thinking",
+      "Pinning goals to dates",
+      "Comparing notes with your brief"
+    ],
     models: [
       "Asking the haberdasher what is in stock",
       "Counting the needles in the drawer",
@@ -95,6 +104,7 @@
     ["/stage-4/", "images"],
     ["/bakeoff/reviewer/", "review"],
     ["/check-models/", "models"],
+    ["/brand-brief/", "analyst"],
     ["/bakeoff/", "images"]
   ];
   function quipsFor(action) {
@@ -168,6 +178,8 @@
     var feed = box.querySelector(".work-feed");
     var thread = box.querySelector(".work-thread");
     var stat = function (name) { return box.querySelector('[data-stat="' + name + '"]'); };
+    // A compact card shows only some numbers; the others are skipped.
+    var put = function (name, text) { var cell = stat(name); if (cell) cell.textContent = text; };
     var stopQuips = null;
     var ticker = null;
     var started = 0;
@@ -178,16 +190,16 @@
       var elapsed = (Date.now() - started) / 1000;
       var made = firstFinished === null ? 0 : finished - firstFinished;
       var left = Math.max(0, total - finished);
-      stat("elapsed").textContent = duration(elapsed);
-      stat("done").textContent = total ? finished + " of " + total : "\u2013";
+      put("elapsed", duration(elapsed));
+      put("done", total ? finished + " of " + total : "\u2013");
       if (thread) thread.style.setProperty("--done", total ? Math.min(100, finished / total * 100) + "%" : "0%");
       if (made > 0 && elapsed > 0) {
         var each = elapsed / made;
-        stat("pace").textContent = duration(each) + " each";
-        stat("eta").textContent = left ? "about " + duration(each * left) : "finishing";
+        put("pace", duration(each) + " each");
+        put("eta", left ? "about " + duration(each * left) : "finishing");
       } else {
-        stat("pace").textContent = "measuring";
-        stat("eta").textContent = "measuring";
+        put("pace", "measuring");
+        put("eta", "measuring");
       }
     };
     return {
@@ -444,6 +456,69 @@
       makeButton.textContent = busyLabel;
       makeLoader.start();
       step();
+    });
+  }
+
+  // Brand interview: send an answer, show the analyst thinking, then load the next question.
+  var answerForm = document.getElementById("answer-form");
+  if (answerForm) {
+    var answerBox = document.getElementById("answer");
+    var answerButton = document.getElementById("answer-button");
+    var answerError = document.getElementById("answer-error");
+    var thinking = inlineLoader(answerForm);
+    var answerToken = answerForm.querySelector("input[name=csrfmiddlewaretoken]").value;
+    var sending = false;
+    answerForm.querySelectorAll(".example-chip").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        answerBox.value = chip.getAttribute("data-answer") || chip.textContent.trim();
+        answerBox.focus();
+        answerBox.setSelectionRange(answerBox.value.length, answerBox.value.length);
+      });
+    });
+    answerBox.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        answerForm.requestSubmit();
+      }
+    });
+    var fail = function (message) {
+      thinking.stop();
+      answerForm.classList.remove("is-thinking");
+      answerError.textContent = message;
+      answerError.hidden = false;
+      answerButton.disabled = false;
+      answerButton.textContent = "Send answer";
+      sending = false;
+    };
+    answerForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (sending) return;
+      if (!answerBox.value.trim()) { fail("Write an answer, tap an example, or tap Skip."); return; }
+      sending = true;
+      answerError.hidden = true;
+      answerButton.disabled = true;
+      answerButton.textContent = "Sending";
+      answerForm.classList.add("is-thinking");
+      thinking.start();
+      var body = new URLSearchParams();
+      body.set("answer", answerBox.value);
+      fetch(answerForm.getAttribute("data-url"), {
+        method: "POST",
+        headers: { "X-CSRFToken": answerToken, "X-Requested-With": "fetch" },
+        credentials: "same-origin",
+        body: body
+      }).then(function (response) {
+        return response.json().then(function (data) { return { ok: response.ok, data: data }; });
+      }).then(function (result) {
+        if (!result.ok && !result.data.saved) {
+          fail(result.data.error || "The analyst did not answer. Press Send again.");
+          return;
+        }
+        // Saved: show the next question, or, if the analyst failed, the page's retry button.
+        window.location.replace(window.location.pathname + "?t=" + Date.now() + "#current");
+      }).catch(function () {
+        fail("The app did not answer. Your answer is still here; press Send again.");
+      });
     });
   }
 

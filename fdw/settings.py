@@ -220,6 +220,28 @@ FDW_EUR_RATES = _eur_rates(os.environ.get("FDW_EUR_RATES", ""))
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
+# --- Brand analyst interview (OpenRouter) -----------------------------------
+
+# The model that interviews the founder and drafts the vision, mission, goals
+# and brand brief. Any OpenRouter chat model works; the default is Kimi K3,
+# Moonshot AI's open-weight flagship (released July 2026, $3 / $15 per million
+# tokens on OpenRouter in November 2026). Change it here to switch vendor.
+FDW_MODEL_ANALYST = os.environ.get("FDW_MODEL_ANALYST", "moonshotai/kimi-k3")
+# Output budget per call, reasoning included. A question needs little; the
+# draft is long. OpenRouter reserves credit against these while a call runs.
+FDW_ANALYST_TURN_TOKENS = int(os.environ.get("FDW_ANALYST_TURN_TOKENS", "6000"))
+FDW_ANALYST_DRAFT_TOKENS = int(os.environ.get("FDW_ANALYST_DRAFT_TOKENS", "16000"))
+# How hard the model thinks: low keeps each question quick; the draft gets more.
+FDW_ANALYST_TURN_EFFORT = os.environ.get("FDW_ANALYST_TURN_EFFORT", "low")
+FDW_ANALYST_DRAFT_EFFORT = os.environ.get("FDW_ANALYST_DRAFT_EFFORT", "medium")
+# Send the founder's answers only to providers that neither store nor train on
+# them (OpenRouter's data_collection "deny" and zero data retention). Set to 0
+# only to accept providers that may keep the answers.
+FDW_ANALYST_PRIVATE = os.environ.get("FDW_ANALYST_PRIVATE", "1").strip().lower() not in {"0", "false", "no", "off"}
+# Hard stop per interview, in US dollars. A full interview is expected to cost
+# well under $1 with the default model.
+FDW_INTERVIEW_LIMIT_USD = Decimal(os.environ.get("FDW_INTERVIEW_LIMIT_USD", "2"))
+
 # Image models to compare. Model names come from OpenRouter's comparison of
 # September 2026; use "Check available models" on the bake-off page to see
 # what your key can reach today, and change this list in .env.

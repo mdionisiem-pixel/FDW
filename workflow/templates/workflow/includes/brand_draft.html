@@ -1,0 +1,49 @@
+{# The analyst's draft, editable, with what changed and what still needs the founder. #}
+<p class="lede">Edit anything here, then approve it. Once approved it goes into every prompt; the current version is kept and can be restored.</p>
+
+{% if draft.to_confirm %}
+  <aside class="callout callout-stack">
+    <p><strong>{{ draft.to_confirm|length }} point{{ draft.to_confirm|pluralize }} for you to settle</strong></p>
+    <ul>{% for c in draft.to_confirm %}<li>{{ c }}</li>{% endfor %}</ul>
+    <p class="meta">Lines the analyst inferred end in "(To confirm)". Correct them below, or continue the interview.</p>
+  </aside>
+{% endif %}
+
+<form method="post" action="{% url 'brand_interview_approve' interview.pk %}" class="brief-form draft-form">
+  {% csrf_token %}
+  <label for="draft-vision">Vision</label>
+  <textarea id="draft-vision" name="vision" rows="2">{{ draft.vision }}</textarea>
+  <label for="draft-mission">Mission</label>
+  <textarea id="draft-mission" name="mission" rows="3">{{ draft.mission }}</textarea>
+  <label for="draft-short-goals">Short-term goals, the next 12 months. One per line: goal (measure; by when)</label>
+  <textarea id="draft-short-goals" name="short_goals" rows="4">{{ draft_short_goals }}</textarea>
+  <label for="draft-long-goals">Long-term goals, 3 to 5 years. One per line: goal (measure; by when)</label>
+  <textarea id="draft-long-goals" name="long_goals" rows="4">{{ draft_long_goals }}</textarea>
+  <label for="draft-text">Brand brief</label>
+  <textarea id="draft-text" name="text" rows="24" spellcheck="true">{{ draft.brief }}</textarea>
+  <div class="form-foot">
+    <p class="meta">Approving replaces the current brief for every stage run from now on.</p>
+    <button class="btn btn-primary" type="submit">Approve and use in every prompt</button>
+  </div>
+</form>
+
+{% if draft.changes %}
+  <details class="fold" open>
+    <summary>What changed from the current brief</summary>
+    <ul>{% for c in draft.changes %}<li>{{ c }}</li>{% endfor %}</ul>
+  </details>
+{% endif %}
+
+<details class="fold">
+  <summary>The current brief, for comparison</summary>
+  <pre class="version-text">{{ brief.prompt_text }}</pre>
+</details>
+
+<div class="interview-actions">
+  <form method="post" action="{% url 'brand_interview_resume' interview.pk %}">
+    {% csrf_token %}<button class="btn" type="submit">Answer more questions first</button>
+  </form>
+  <form method="post" action="{% url 'brand_interview_close' interview.pk %}">
+    {% csrf_token %}<button class="btn btn-quiet" type="submit">Discard the draft</button>
+  </form>
+</div>
