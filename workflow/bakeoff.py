@@ -322,8 +322,8 @@ class OpenRouterImages:
             except (TypeError, ValueError):
                 wait = 10
             return BudgetBusy(
-                "OpenRouter returned 402: the images already being made are holding all the credit "
-                "OpenRouter lets your balance hold at once. Nothing was charged.",
+                "OpenRouter returned 402 (in_flight_budget_exhausted): the images already being made are holding "
+                "all the credit OpenRouter lets your balance hold at once. Nothing was charged.",
                 retry_after=max(1, min(wait, 60)),
             )
         if source == "openrouter_key_limit":
@@ -331,14 +331,15 @@ class OpenRouterImages:
                     "reset, at https://openrouter.ai/settings/keys.")
         elif reason == "weight_exceeds_budget":
             return TooLargeForBudget(
-                "OpenRouter returned 402. OpenRouter estimates this image, with its reference images, at more than "
-                "it will hold against your current balance at once. Adding credit at "
-                "https://openrouter.ai/settings/credits removes the limit. Nothing was charged for this image; "
+                "OpenRouter returned 402 (weight_exceeds_budget): OpenRouter estimates this one request at more "
+                "than it will hold against your current balance at once. Adding credit at "
+                "https://openrouter.ai/settings/credits raises that limit. Nothing was charged for this image; "
                 "press the button again once that is done."
             )
         else:
             text = "Your OpenRouter balance cannot cover the next image. Add credits at https://openrouter.ai/settings/credits."
-        return OutOfCredit(f"OpenRouter returned 402. {text} Nothing was charged for this image; "
+        code = reason or source or "payment_required"
+        return OutOfCredit(f"OpenRouter returned 402 ({code}). {text} Nothing was charged for this image; "
                            "press the button again once that is done.")
 
     def _request(self, method, path, payload=None, timeout=IMAGE_TIMEOUT_SECONDS):
@@ -372,17 +373,35 @@ class OpenRouterImages:
         except json.JSONDecodeError as exc:
             raise BakeoffError("OpenRouter's answer was not readable.") from exc
 
-    def _send_image_request(self, payload):
+    def _send_image_request(self, payload, path="/images"):
         """POST one image request, waiting out OpenRouter's in-flight budget a few times before giving up."""
         for attempt in range(BUDGET_RETRIES + 1):
             try:
-                return self._request("POST", "/images", payload)
+                return self._request("POST", path, payload)
             except BudgetBusy as exc:
                 if attempt == BUDGET_RETRIES:
                     raise
                 _sleep(exc.retry_after)
 
+    @staticmethod
+    def uses_chat(model: str) -> bool:
+        """Whether this model is sent through chat completions, where max_tokens can be set.
+
+        OpenRouter holds an estimated cost for every request while it runs, and
+        for a prepaid balance below its threshold it refuses any request whose
+        estimate is larger than the share of the balance it will hold. The
+        estimate's output part comes from max_tokens; without it, OpenRouter
+        uses a fixed cap. The Image API (/images) has no max_tokens, so a Gemini
+        3 Pro image (output at $120 per million tokens) is estimated at that cap
+        and refused once the balance falls to a few dollars, even though each
+        image really produces about 1,120 output tokens ($0.14). Chat
+        completions accepts max_tokens for the Gemini image models.
+        """
+        return any(model.startswith(prefix) for prefix in settings.FDW_CHAT_IMAGE_PREFIXES)
+
     def generate(self, model, prompt, references):
+        if self.uses_chat(model):
+            return self._generate_chat(model, prompt, references)
         payload = {"model": model, "prompt": prompt, "n": 1,
                    "resolution": settings.FDW_IMAGE_RESOLUTION, "aspect_ratio": "4:5"}
         if references:
@@ -402,7 +421,44 @@ class OpenRouterImages:
         b64 = items[0].get("b64_json")
         if not b64:
             raise BakeoffError(f"{model} did not return the image data.")
-        image = base64.b64decode(b64)
+        return self._finish(model, base64.b64decode(b64), data)
+
+    def _generate_chat(self, model, prompt, references):
+        content = [{"type": "text", "text": prompt}]
+        content += [{"type": "image_url", "image_url": {"url": r}} for r in references]
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": content}],
+            "modalities": ["image", "text"],
+            "max_tokens": settings.FDW_IMAGE_MAX_TOKENS,
+            "image_config": {"aspect_ratio": "4:5", "image_size": settings.FDW_IMAGE_RESOLUTION},
+        }
+        try:
+            data = self._send_image_request(payload, "/chat/completions")
+        except BakeoffError as exc:
+            if "returned 400" not in str(exc):
+                raise
+            # A provider that rejects the size or aspect gets its defaults instead.
+            payload.pop("image_config", None)
+            data = self._send_image_request(payload, "/chat/completions")
+        choice = (data.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        url = ""
+        for item in message.get("images") or []:
+            url = ((item or {}).get("image_url") or {}).get("url") or ""
+            if url:
+                break
+        if not url.startswith("data:") or "," not in url:
+            if choice.get("finish_reason") == "length":
+                raise BakeoffError(
+                    f"{model} stopped at FDW_IMAGE_MAX_TOKENS ({settings.FDW_IMAGE_MAX_TOKENS}) before finishing "
+                    "the image. Raise it in .env and press the button again."
+                )
+            said = str(message.get("content") or "").strip()[:200]
+            raise BakeoffError(f"{model} returned no image." + (f" It said: {said}" if said else ""))
+        return self._finish(model, base64.b64decode(url.split(",", 1)[1]), data)
+
+    def _finish(self, model, image, data):
         if len(image) > MAX_IMAGE_BYTES:
             raise BakeoffError(f"{model} returned an image larger than 25 MB.")
         kind = sniff(image)
