@@ -154,6 +154,8 @@ def make_next(request, pk):
         "finished": progress["waiting"] == 0,
         "progress": progress,
         "last": {"shot": image.get_shot_display(), "status": image.status},
+        # The model's name stays out: images are scored blind.
+        "did": f"{image.get_shot_display()}: " + ("made." if image.status == "done" else "failed."),
     })
 
 
@@ -320,4 +322,5 @@ def reviewer_next(request):
     except bakeoff.BakeoffError as exc:
         return JsonResponse({"error": str(exc), "progress": reviewer_check.progress(run)}, status=409)
     progress = reviewer_check.progress(run)
-    return JsonResponse({"finished": result is None or progress["waiting"] == 0, "progress": progress})
+    return JsonResponse({"finished": result is None or progress["waiting"] == 0, "progress": progress,
+                         "did": reviewer_check.describe(result) if result else ""})

@@ -34,5 +34,17 @@ class LoaderCoverageTests(SimpleTestCase):
             for route in LOOP_ROUTES:
                 for match in re.finditer(r"<div[^>]*data-url=\"\{% url '" + route + r"'[^\"]*\"[^>]*>(.{0,400})", text, re.S):
                     found.add(route)
-                    self.assertIn('class="inline-working"', match.group(1), f"{name}: {route} has no loader")
+                    self.assertIn('includes/work_card.html', match.group(1), f"{name}: {route} has no work card")
         self.assertEqual(found, set(LOOP_ROUTES))
+
+    def test_work_card_has_the_parts_the_script_fills(self):
+        card = (TEMPLATES / "includes" / "work_card.html").read_text()
+        for part in ('class="inline-working', 'class="loaders inline-loaders"', 'class="working-quip"',
+                     'data-stat="elapsed"', 'data-stat="done"', 'data-stat="pace"', 'data-stat="eta"', 'class="work-feed"'):
+            self.assertIn(part, card)
+
+    def test_overlay_has_fixed_stats_not_a_free_text_line(self):
+        base = (TEMPLATES / "base.html").read_text()
+        self.assertIn('id="working-stats"', base)
+        self.assertIn('id="working-feed"', base)
+        self.assertNotIn('id="working-progress"', base)

@@ -1,0 +1,18 @@
+{# In-panel working card for pages that drive a model one request at a time. #}
+{# The card has a fixed size, so the rotating caption and live numbers never move it. #}
+<div class="inline-working work-card" hidden>
+  <div class="loaders inline-loaders" aria-hidden="true"></div>
+  <div class="work-body">
+    <p class="work-title">{{ title }}</p>
+    <p class="working-quip" aria-hidden="true"></p>
+    <dl class="work-stats">
+      <div><dt>Elapsed</dt><dd data-stat="elapsed">0 s</dd></div>
+      <div><dt>{{ done_label|default:"Done" }}</dt><dd data-stat="done">&ndash;</dd></div>
+      <div><dt>Pace</dt><dd data-stat="pace">&ndash;</dd></div>
+      <div><dt>Time left</dt><dd data-stat="eta">&ndash;</dd></div>
+      {% if show_spend %}<div><dt>Spent of ${{ spend_limit|floatformat:"0" }}</dt><dd data-stat="spent">&ndash;</dd></div>{% endif %}
+    </dl>
+    <div class="work-thread" aria-hidden="true"><span class="work-thread-fill"></span><span class="work-thread-needle"></span></div>
+    <ol class="work-feed" aria-live="polite" aria-label="Recently finished"><li class="work-feed-empty">The first result will appear here.</li></ol>
+  </div>
+</div>

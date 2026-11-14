@@ -77,7 +77,7 @@
 
       {% if progress.total %}
         <div class="make" id="make" data-url="{% url 'bakeoff_make_next' piece.pk %}" data-loader="cross" data-quips="images">
-          <div class="inline-working" hidden aria-hidden="true"><div class="loaders inline-loaders"></div><p class="working-quip"></p></div>
+          {% include "workflow/includes/work_card.html" with title="Making test images" done_label="Images" %}
 
           <div class="spend-track make-track" role="progressbar" aria-valuemin="0" aria-valuemax="{{ progress.total }}" aria-valuenow="{{ progress.done|add:progress.failed }}">
             <div class="spend-fill" id="make-fill" style="width: {% widthratio progress.done|add:progress.failed progress.total 100 %}%"></div>

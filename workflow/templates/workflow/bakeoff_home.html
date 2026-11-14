@@ -45,7 +45,7 @@
       <h2>Models being compared</h2>
       <ul class="model-list">{% for m in default_models %}<li><code>{{ m }}</code></li>{% endfor %}</ul>
       <p class="meta">Set in <code>FDW_BAKEOFF_MODELS</code> in your .env file. You can also add one per piece.</p>
-      <form method="post" action="{% url 'bakeoff_check_models' %}" data-working="Asking OpenRouter which image models your key can reach" data-loader="spool" data-quips="general">
+      <form method="post" action="{% url 'bakeoff_check_models' %}" data-working="Asking OpenRouter which image models your key can reach" data-loader="spool" data-quips="models">
         {% csrf_token %}
         <button class="btn" type="submit">Check available models</button>
       </form>

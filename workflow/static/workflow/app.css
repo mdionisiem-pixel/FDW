@@ -349,13 +349,16 @@ thead th { font-size: 0.82rem; color: var(--ink-soft); font-weight: 600; border-
 .form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; gap: 1rem; flex-wrap: wrap; }
 
 /* Working overlay: the one moving element, a stitch being sewn */
-.working { position: fixed; inset: 0; background: rgba(27, 33, 64, 0.55); display: grid; place-items: center; z-index: 40; padding: 1rem; }
+.working { position: fixed; inset: 0; background: rgba(27, 33, 64, 0.55); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; z-index: 40; padding: 1rem; }
 .working[hidden] { display: none; }
-.working-card { background: var(--paper); border-radius: 14px; padding: 2rem 2.25rem; max-width: 28rem; text-align: left; }
+.working-card { min-width: 0; background: var(--paper); border-radius: 14px; padding: 1.75rem 2rem; width: min(30rem, 100%); box-sizing: border-box; text-align: left; }
 .working-title { font-family: var(--display); font-weight: 650; font-size: 1.3rem; margin: 0.75rem 0 0.35rem; }
 .working-note { color: var(--ink-soft); }
-.working-progress { margin: 0 0 0.35rem; font-size: 0.92rem; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
-.working-progress[hidden] { display: none; }
+.working-card .working-quip { margin-bottom: 0.6rem; }
+.working-card .working-stats { grid-template-columns: 6.5rem 6.5rem minmax(0, 1fr); margin-bottom: 0.5rem; }
+.working-card .working-stats.is-single { grid-template-columns: 1fr; }
+.working-steps[hidden] { display: none; }
+.working-card .work-feed { margin-bottom: 0.6rem; }
 /* Sewing loaders: one is shown per run, chosen in app.js by the step that is working. */
 .loaders { position: relative; display: flex; justify-content: center; align-items: center; height: 152px; background: var(--chalk); border-radius: var(--radius); padding: 0.5rem; overflow: hidden; }
 .loaders::after { content: ""; position: absolute; inset: 6px; border: 1.5px dashed var(--line); border-radius: calc(var(--radius) - 4px); pointer-events: none; }
@@ -657,7 +660,7 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .model-pick legend { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.35rem; }
 .check { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; margin: 0; }
 .check input { accent-color: var(--floss); width: 1.05rem; height: 1.05rem; }
-.make { display: grid; gap: 0.6rem; justify-items: start; border-top: 1.5px solid var(--line); padding-top: 1rem; }
+.make { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.6rem; justify-items: start; border-top: 1.5px solid var(--line); padding-top: 1rem; }
 .make-track { width: 100%; max-width: 32rem; height: 10px; }
 .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }
 .score-card { margin: 0; border: 1.5px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--paper); display: flex; flex-direction: column; }
@@ -781,13 +784,55 @@ code { font-size: 0.88em; background: var(--chalk); padding: 0.1rem 0.35rem; bor
 .reviewer-check-line { margin-top: 0.5rem; }
 .reviewer-check-line.state-ready { color: var(--moss); }
 
-/* Rotating captions and in-panel loaders */
-.working-quip { margin: 0 0 0.5rem; min-height: 1.4em; color: var(--floss-deep); font-style: italic; font-size: 0.95rem; }
-.inline-working { margin: 0.75rem 0; }
+/* Rotating captions and in-panel loaders.
+   Every box here has a fixed size: captions and live numbers change many times a
+   minute, and a box that sized itself to its text would jump each time. */
+.working-quip { margin: 0; height: 1.45em; line-height: 1.45em; color: var(--floss-deep); font-style: italic; font-size: 0.95rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity 0.25s ease, transform 0.25s ease; }
+.working-quip.is-swapping { opacity: 0; transform: translateY(3px); }
 .inline-working[hidden] { display: none; }
-.inline-loaders { height: 120px; max-width: 26rem; }
-.inline-loaders .loader { max-height: 104px; width: auto; }
-.inline-working .working-quip { margin-top: 0.5rem; }
+.work-card { justify-self: stretch; box-sizing: border-box; width: 100%; max-width: 46rem; margin: 0.25rem 0 0.5rem;
+  display: grid; grid-template-columns: 12rem minmax(0, 1fr); gap: 1.1rem; align-items: center;
+  background: var(--paper); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 0.85rem;
+  box-shadow: 0 1px 0 rgba(27, 33, 64, 0.04), 0 6px 18px -12px rgba(27, 33, 64, 0.35); }
+.work-card .inline-loaders { width: 100%; height: 136px; padding: 0.35rem; box-sizing: border-box; }
+.work-card .inline-loaders .loader { width: 100%; height: 100%; max-height: 120px; }
+.work-body { min-width: 0; display: grid; gap: 0.45rem; }
+.work-title { margin: 0; font-family: var(--display); font-weight: 650; font-size: 1.05rem; display: flex; align-items: center; gap: 0.5rem; }
+.work-title::before { content: ""; flex: none; width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--floss);
+  box-shadow: 0 0 0 0 rgba(194, 37, 92, 0.45); animation: work-live 1.8s ease-out infinite; }
+@keyframes work-live { 0% { box-shadow: 0 0 0 0 rgba(194, 37, 92, 0.45); } 70%, 100% { box-shadow: 0 0 0 7px rgba(194, 37, 92, 0); } }
+.work-stats { margin: 0.1rem 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(5.2rem, 1fr)); gap: 0.4rem;
+  border-top: 1.5px dashed var(--line); border-bottom: 1.5px dashed var(--line); padding: 0.45rem 0; }
+.work-stats > div { min-width: 0; }
+.work-stats dt { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+.work-stats dd { margin: 0; font-weight: 600; font-size: 0.92rem; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A thread pulled through the fabric as the work completes. */
+.work-thread { position: relative; height: 8px; margin: 0.05rem 0.4rem 0.1rem 0; --done: 0%; }
+.work-thread::before { content: ""; position: absolute; left: 0; right: 0; top: 3px; border-top: 2px dashed var(--line); }
+.work-thread-fill { position: absolute; left: 0; top: 3px; width: var(--done); border-top: 2px solid var(--floss); transition: width 0.6s ease; }
+.work-thread-needle { position: absolute; top: 1px; left: var(--done); width: 18px; height: 6px; margin-left: -1px; transition: left 0.6s ease;
+  border-radius: 1px 6px 6px 1px / 1px 3px 3px 1px; background: linear-gradient(180deg, #d9d7cf, #8c8a84);
+  box-shadow: inset 4px 0 0 -2px #fff; }
+.work-thread-needle::after { content: ""; position: absolute; left: 3px; top: 2px; width: 4px; height: 2px; border-radius: 1px; background: var(--paper); }
+.make.is-running .make-track, .make.is-running .visual-last { display: none; }
+.work-feed { list-style: none; margin: 0; padding: 0; height: 4.2em; overflow: hidden; font-size: 0.86rem; line-height: 1.4em; }
+.work-feed li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); }
+.work-feed li:first-child { color: var(--ink); animation: work-in 0.35s ease-out; }
+.work-feed li:not(.work-feed-empty)::before { content: "\2713"; display: inline-block; width: 1.1em; color: var(--moss); font-weight: 700; }
+.work-feed li.is-failed::before { content: "\00d7"; color: var(--floss); }
+.work-feed-empty { font-style: italic; }
+.work-feed-time { font-variant-numeric: tabular-nums; color: var(--ink-soft); font-size: 0.8rem; }
+@keyframes work-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (max-width: 600px) {
+  .work-card { grid-template-columns: 1fr; }
+  .work-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-title::before, .work-feed li:first-child { animation: none; }
+  .work-thread-fill, .work-thread-needle { transition: none; }
+  .working-quip { transition: none; }
+}
 
 /* Reviewer check: marking stage 4 images */
 .mark-grid { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(min(10rem, 45%), 1fr)); }
