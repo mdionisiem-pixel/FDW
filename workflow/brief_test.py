@@ -109,6 +109,23 @@ def run(test: BriefTest, client=None) -> BriefTest:
         test.cycle_a = _copy(test.source_cycle, "A")
         test.cycle_b = _copy(test.source_cycle, "B")
         test.save(update_fields=["cycle_a", "cycle_b"])
+    return _run_copies(test, [("A", test.cycle_a, test.brief_a), ("B", test.cycle_b, test.brief_b)], client)
+
+
+def finish(test: BriefTest, client=None) -> BriefTest:
+    """Finish a test that stopped part-way, on the same copies.
+
+    Every answer already paid for is reused (see llm._earlier_answer), so only
+    the steps that never finished cost money. A run that did finish is left as it is."""
+    if test.status != BriefTest.Status.FAILED or test.cycle_a is None or test.cycle_b is None:
+        raise BriefTestError("Only a test that stopped part-way can be finished.")
+    todo = [(letter, cycle, text) for letter, cycle, text in
+            (("A", test.cycle_a, test.brief_a), ("B", test.cycle_b, test.brief_b)) if not cycle.concepts.exists()]
+    test.error = ""
+    return _run_copies(test, todo, client)
+
+
+def _run_copies(test: BriefTest, runs, client) -> BriefTest:
     errors = {}
 
     def one(letter, cycle, brief_text):
@@ -123,16 +140,15 @@ def run(test: BriefTest, client=None) -> BriefTest:
         finally:
             connection.close()  # each worker closes its own connection, as stage 2's own workers do
 
-    if settings.FDW_PARALLEL_CALLS > 1:
-        threads = [threading.Thread(target=in_thread, args=("A", test.cycle_a, test.brief_a)),
-                   threading.Thread(target=in_thread, args=("B", test.cycle_b, test.brief_b))]
+    if settings.FDW_PARALLEL_CALLS > 1 and len(runs) > 1:
+        threads = [threading.Thread(target=in_thread, args=run) for run in runs]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
     else:
-        one("A", test.cycle_a, test.brief_a)
-        one("B", test.cycle_b, test.brief_b)
+        for run in runs:
+            one(*run)
     if errors:
         test.status = BriefTest.Status.FAILED
         test.error = "; ".join(f"Run {k}: {v}" for k, v in sorted(errors.items()))[:4000]

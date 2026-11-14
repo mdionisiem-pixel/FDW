@@ -50,6 +50,20 @@ def start(request):
 
 @login_required
 @require_POST
+def finish(request, pk):
+    test = get_object_or_404(BriefTest, pk=pk)
+    try:
+        brief_test.finish(test)
+    except (brief_test.BriefTestError, StageError) as exc:
+        messages.error(request, str(exc))
+    else:
+        if test.status == BriefTest.Status.FAILED:
+            messages.error(request, "A run still did not finish. " + test.error)
+    return redirect("bakeoff_brief_test_detail", pk=test.pk)
+
+
+@login_required
+@require_POST
 def judge(request, pk):
     test = get_object_or_404(BriefTest, pk=pk)
     answers = {key: request.POST.get(key, "") for key, _ in brief_test.QUESTIONS}

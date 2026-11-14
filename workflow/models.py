@@ -546,6 +546,8 @@ class ModelCall(models.Model):
     ok = models.BooleanField(default=True)
     error = models.TextField(blank=True)
     dry_run = models.BooleanField(default=False)
+    # A brief test retry reused an earlier successful answer to the identical prompt, at no cost.
+    reused = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

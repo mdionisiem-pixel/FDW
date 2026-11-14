@@ -102,8 +102,9 @@ class ApprovalAdmin(ReadOnlyAdmin):
 
 @admin.register(ModelCall)
 class ModelCallAdmin(ReadOnlyAdmin):
-    list_display = ("step", "cycle", "model", "input_tokens", "output_tokens", "web_searches", "cost_usd", "ok", "dry_run", "created_at")
-    list_filter = ("step", "ok", "dry_run", "cycle")
+    list_display = ("step", "cycle", "model", "input_tokens", "output_tokens", "web_searches", "cost_usd", "ok", "reused",
+                    "dry_run", "created_at")
+    list_filter = ("step", "ok", "reused", "dry_run", "cycle")
 
 
 @admin.register(BakeoffPiece)

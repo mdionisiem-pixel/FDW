@@ -10,6 +10,7 @@ urlpatterns = [
     path("bakeoff/brief-test/<int:pk>/", views_brief_test.page, name="bakeoff_brief_test_detail"),
     path("bakeoff/brief-test/start/", views_brief_test.start, name="bakeoff_brief_test_start"),
     path("bakeoff/brief-test/<int:pk>/judge/", views_brief_test.judge, name="bakeoff_brief_test_judge"),
+    path("bakeoff/brief-test/<int:pk>/finish/", views_brief_test.finish, name="bakeoff_brief_test_finish"),
     path("bakeoff/brief-test/<int:pk>/discard/", views_brief_test.discard, name="bakeoff_brief_test_discard"),
     path("bakeoff/reviewer/", views_bakeoff.reviewer, name="bakeoff_reviewer"),
     path("bakeoff/reviewer/start/", views_bakeoff.reviewer_start, name="bakeoff_reviewer_start"),
