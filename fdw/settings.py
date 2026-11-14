@@ -222,6 +222,16 @@ FDW_BAKEOFF_MODELS = [
     ).split(",") if m.strip()
 ]
 FDW_IMAGE_RESOLUTION = os.environ.get("FDW_IMAGE_RESOLUTION", "2K")
+# Image models sent through chat completions, where a token cap can be set.
+# OpenRouter estimates a request's cost from that cap before running it, and
+# refuses one whose estimate exceeds the share of a small balance it will hold.
+FDW_CHAT_IMAGE_PREFIXES = tuple(
+    p.strip() for p in os.environ.get("FDW_CHAT_IMAGE_PREFIXES", "google/").split(",") if p.strip()
+)
+# Output token cap per image on that route. Gemini 3 Pro images use about
+# 1,120 output tokens (OpenRouter logs, 14 November 2026); 4,000 leaves room
+# and keeps the estimate near $0.48 at $120 per million output tokens.
+FDW_IMAGE_MAX_TOKENS = int(os.environ.get("FDW_IMAGE_MAX_TOKENS", "4000"))
 # Hard stop for the whole bake-off, in US dollars. Image costs are as
 # reported by OpenRouter; the Claude call that writes the prompts counts too.
 FDW_BAKEOFF_LIMIT_USD = Decimal(os.environ.get("FDW_BAKEOFF_LIMIT_USD", "10"))
