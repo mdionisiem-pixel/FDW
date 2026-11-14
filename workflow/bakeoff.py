@@ -55,6 +55,28 @@ class BakeoffError(StageError):
     """A bake-off step could not finish. The message is safe to show."""
 
 
+class OutOfCredit(BakeoffError):
+    """OpenRouter refused the request for lack of credit. Retrying will not help until credit is added."""
+
+
+class BudgetBusy(BakeoffError):
+    """OpenRouter's in-flight budget is full: requests already running hold the credit. Retry shortly.
+
+    OpenRouter lets a prepaid balance hold only part of itself for requests that
+    are still running. Several images made at once can fill it even when the
+    balance is enough for each of them on its own.
+    """
+
+    def __init__(self, message, retry_after=10):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+# Waiting for the in-flight budget inside one request, before handing the wait back to the page.
+BUDGET_RETRIES = 2
+_sleep = time.sleep
+
+
 # --- Photos -------------------------------------------------------------------
 
 
@@ -274,6 +296,39 @@ class OpenRouterImages:
         self.base = settings.OPENROUTER_BASE_URL.rstrip("/")
         self.tls = _tls_context()
 
+    def _payment_error(self, exc, detail: str) -> BakeoffError:
+        """Turn OpenRouter's 402 into an error that says what happened and what to do.
+
+        OpenRouter rejects these before any provider is called, so nothing is charged.
+        """
+        try:
+            error = json.loads(detail).get("error") or {}
+        except (ValueError, AttributeError):
+            error = {}
+        meta = error.get("metadata") or {}
+        reason = str(meta.get("reason") or "")
+        source = str(meta.get("limit_source") or "")
+        if reason == "in_flight_budget_exhausted" or source == "openrouter_in_flight_budget":
+            try:
+                wait = int(float(exc.headers.get("Retry-After") or 10))
+            except (TypeError, ValueError):
+                wait = 10
+            return BudgetBusy(
+                "OpenRouter returned 402: the images already being made are holding all the credit "
+                "OpenRouter lets your balance hold at once. Nothing was charged.",
+                retry_after=max(1, min(wait, 60)),
+            )
+        if source == "openrouter_key_limit":
+            text = ("This OpenRouter key has reached its own credit limit. Raise the key's limit, or wait for it to "
+                    "reset, at https://openrouter.ai/settings/keys.")
+        elif reason == "weight_exceeds_budget":
+            text = ("One image costs more than OpenRouter lets a balance this size hold at once. Add credits at "
+                    "https://openrouter.ai/settings/credits.")
+        else:
+            text = "Your OpenRouter balance cannot cover the next image. Add credits at https://openrouter.ai/settings/credits."
+        return OutOfCredit(f"OpenRouter returned 402. {text} Nothing was charged for this image; "
+                           "press the button again once that is done.")
+
     def _request(self, method, path, payload=None, timeout=IMAGE_TIMEOUT_SECONDS):
         body = json.dumps(payload).encode() if payload is not None else None
         request = urllib.request.Request(
@@ -289,6 +344,8 @@ class OpenRouterImages:
                 raw = response.read(MAX_IMAGE_BYTES * 2)
         except urllib.error.HTTPError as exc:
             detail = exc.read(2000).decode("utf-8", "replace")
+            if exc.code == 402:
+                raise self._payment_error(exc, detail) from exc
             raise BakeoffError(f"OpenRouter returned {exc.code}: {detail[:400]}") from exc
         except (urllib.error.URLError, TimeoutError) as exc:
             reason = getattr(exc, "reason", exc)
@@ -303,20 +360,30 @@ class OpenRouterImages:
         except json.JSONDecodeError as exc:
             raise BakeoffError("OpenRouter's answer was not readable.") from exc
 
+    def _send_image_request(self, payload):
+        """POST one image request, waiting out OpenRouter's in-flight budget a few times before giving up."""
+        for attempt in range(BUDGET_RETRIES + 1):
+            try:
+                return self._request("POST", "/images", payload)
+            except BudgetBusy as exc:
+                if attempt == BUDGET_RETRIES:
+                    raise
+                _sleep(exc.retry_after)
+
     def generate(self, model, prompt, references):
         payload = {"model": model, "prompt": prompt, "n": 1,
                    "resolution": settings.FDW_IMAGE_RESOLUTION, "aspect_ratio": "4:5"}
         if references:
             payload["input_references"] = [{"type": "image_url", "image_url": {"url": r}} for r in references]
         try:
-            data = self._request("POST", "/images", payload)
+            data = self._send_image_request(payload)
         except BakeoffError as exc:
             if "returned 400" not in str(exc):
                 raise
             # Some providers reject a size or aspect they do not support; try their defaults.
             payload.pop("resolution", None)
             payload.pop("aspect_ratio", None)
-            data = self._request("POST", "/images", payload)
+            data = self._send_image_request(payload)
         items = data.get("data") or []
         if not items:
             raise BakeoffError(f"{model} returned no image.")
